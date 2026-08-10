@@ -1,0 +1,2 @@
+# keep LF endings so Windows editors do not turn every commit into a full-file diff
+*.html text eol=lf
