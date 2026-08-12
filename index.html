@@ -83,8 +83,9 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Segoe UI",system-ui,-a
 .page{flex:1;overflow:auto;padding:0 16px 14px}
 .g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding-top:9px}
 .g4>.w2{grid-column:span 2}
+.g4>.w4{grid-column:1/-1}          /* full-width row, e.g. the stacked record tables */
 @media(max-width:1500px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.kstrip{grid-template-columns:repeat(4,1fr)}}
-@media(max-width:820px){.g4{grid-template-columns:1fr}.g4>.w2{grid-column:span 1}.kstrip{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:820px){.g4{grid-template-columns:1fr}.g4>.w2,.g4>.w4{grid-column:span 1}.kstrip{grid-template-columns:repeat(2,1fr)}}
 .tile{background:var(--pnl);border:1px solid var(--line);border-radius:8px;box-shadow:var(--sh);
  display:flex;flex-direction:column;height:var(--th,322px);min-width:0}
 .tile.t2{height:calc(var(--th,322px)*2 + 9px)}
@@ -1265,20 +1266,21 @@ function pgSal(d,m){
 
 /* ---- page: records ---- */
 function pgRec(d){
-  return tile('Candidate records',d.length+' rows matching the current filters — click any header to sort','<div>'+
+  /* stacked full-width, requisitions first — these tables are far too wide to sit side by side */
+  return tile('Requisition records',applyR().length+' requisitions','<div>'+
+      tbl('t_rq',[{t:'Position'},{t:'Code'},{t:'Dept'},{t:'Location'},{t:'Status'},{t:'Need',n:1},{t:'On board',n:1},
+        {t:'Open',n:1},{t:'Owner'},{t:'Days open',n:1},{t:'Due'},{t:'Remark',w:1}],
+        applyR().map(q=>[q.pos,q.code||'–',q.dept,q.loc,
+          {s:q.status,h:`<span class="pill" style="background:${q.status==='OPEN'?'rgba(245,165,36,.15);color:var(--a3)':q.status==='CLOSED'?'rgba(46,204,155,.15);color:var(--a2)':'rgba(147,161,179,.15);color:var(--tx2)'}">${esc(q.status)}</span>`},
+          q.nos,q.onboard,nv(q.bal,q.bal>0?'o':''),q.owner,nv(q.age),q.end||'–',q.remark||'–']))+'</div>','t2 w4')
+    + tile('Candidate records',d.length+' rows matching the current filters — click any header to sort','<div>'+
     tbl('t_all',[{t:'Candidate'},{t:'Position'},{t:'Code'},{t:'Dept'},{t:'Source'},{t:'Recruiter'},{t:'Interviewer'},
       {t:'Location'},{t:'Mode'},{t:'Status'},{t:'CV date'},{t:'Interview'},{t:'Selected'},{t:'Joined'},
       {t:'Days',n:1},{t:'Current ₹',n:1},{t:'Expected ₹',n:1},{t:'Hike',n:1},{t:'Remark',w:1}],
       d.map(r=>[r.name,r.pos,r.code||'–',r.dept,r.src,r.rec,r.panel,r.loc,r.mode,
         {s:r.status,h:statusPill(r.status)},r.cvd||'–',r.ivd||'–',r.seld||'–',r.jd||'–',
         nv(r.d_total),nv(r.cs,'',inr),nv(r.es,'',inr),nv(r.hike,r.hike>50?'r':'',v=>f1(v)+'%'),r.remark||'–']))
-    +'</div>','t2 w2')
-    + tile('Requisition records',applyR().length+' requisitions','<div>'+
-      tbl('t_rq',[{t:'Position'},{t:'Code'},{t:'Dept'},{t:'Location'},{t:'Status'},{t:'Need',n:1},{t:'On board',n:1},
-        {t:'Open',n:1},{t:'Owner'},{t:'Days open',n:1},{t:'Due'},{t:'Remark',w:1}],
-        applyR().map(q=>[q.pos,q.code||'–',q.dept,q.loc,
-          {s:q.status,h:`<span class="pill" style="background:${q.status==='OPEN'?'rgba(245,165,36,.15);color:var(--a3)':q.status==='CLOSED'?'rgba(46,204,155,.15);color:var(--a2)':'rgba(147,161,179,.15);color:var(--tx2)'}">${esc(q.status)}</span>`},
-          q.nos,q.onboard,nv(q.bal,q.bal>0?'o':''),q.owner,nv(q.age),q.end||'–',q.remark||'–']))+'</div>','t2 w2');
+    +'</div>','t2 w4');
 }
 
 /* ---- insights ---- */
