@@ -53,25 +53,6 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Segoe UI",system-ui,-a
 .pop .acts button{flex:1;background:var(--pnl2);border:1px solid var(--line);color:var(--tx2);border-radius:5px;
  padding:4px;font:600 10.5px inherit;cursor:pointer}
 .pop .acts button:hover{color:var(--a1);border-color:var(--a1)}
-/* custom date range inside the Period popover */
-.pop .rng{border-bottom:1px solid var(--line);margin-bottom:7px;padding-bottom:7px}
-.pop .rng .rl{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx3);
- font-weight:700;margin-bottom:5px}
-.pop .rng .rr{display:flex;gap:5px;align-items:center;margin-bottom:6px}
-.pop .rng .rr i{font-style:normal;color:var(--tx3);font-size:10.5px}
-.pop .rng input[type=date]{flex:1;min-width:0;background:var(--pnl2);border:1px solid var(--line);
- color:var(--tx);border-radius:5px;padding:4px 6px;font:11.5px inherit;color-scheme:dark}
-.pop .rng input[type=date]:focus{outline:none;border-color:var(--a1)}
-.pop .rng .pre{display:flex;flex-wrap:wrap;gap:4px}
-.pop .rng .pre button{background:var(--pnl2);border:1px solid var(--line);color:var(--tx2);
- border-radius:5px;padding:3px 7px;font:600 10px inherit;cursor:pointer}
-.pop .rng .pre button:hover{color:var(--a1);border-color:var(--a1)}
-.pop .rng .pre button.on{color:var(--a1);border-color:var(--a1);background:rgba(76,141,255,.12)}
-.pop .rng .rnote{font-size:10px;color:var(--a3);margin-top:6px;display:none;line-height:1.35}
-.pop.rngon .rng .rnote{display:block}
-.pop.rngon .list,.pop.rngon .acts,.pop.rngon input.s{opacity:.35;pointer-events:none}
-#dd_ym>button{min-width:158px}
-#dd_ym>button s{max-width:158px}
 .pop .list{max-height:238px;overflow:auto}
 .pop label{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--tx2)}
 .pop label:hover{background:var(--pnl2);color:var(--tx)}
@@ -493,67 +474,6 @@ const FDEFS=[
 ];
 let F={}; FDEFS.forEach(d=>F[d.id]=new Set()); let FQ='';
 
-/* ---- custom date range (Period filter) ----
-   Filters on CV date, the same field the monthly Period buckets are built from.
-   While a range is set the month checkboxes are ignored, so there is exactly one
-   source of truth for "which period am I looking at". */
-let DR={from:'',to:'',preset:''};
-const rangeOn=()=>!!(DR.from||DR.to);
-const isoL=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
-const dLab=v=>{const p=String(v||'').split('-');
-  return p.length===3?(+p[2])+' '+MON[+p[1]-1]+" '"+p[0].slice(2):v;};
-const PRESETS=[['30','Last 30d'],['90','Last 90d'],['mtd','This month'],['qtd','This quarter'],
-  ['ytd','This year'],['fy','FY to date']];
-
-function rangeHTML(){
-  return '<div class="rng">'
-    +'<div class="rl">Custom date range \u00b7 CV date</div>'
-    +'<div class="rr">'
-      +'<input type="date" id="dr_from" value="'+DR.from+'" title="From (CV date)" onchange="setRange(event)">'
-      +'<i>to</i>'
-      +'<input type="date" id="dr_to" value="'+DR.to+'" title="To (CV date)" onchange="setRange(event)">'
-    +'</div>'
-    +'<div class="pre">'
-      +PRESETS.map(p=>'<button data-p="'+p[0]+'" class="'+(DR.preset===p[0]?'on':'')
-        +'" onclick="preset(\''+p[0]+'\',event)">'+p[1]+'</button>').join('')
-      +'<button data-p="" onclick="clearRange(event)">Clear range</button>'
-    +'</div>'
-    +'<div class="rnote">Date range is active \u2014 the month list below is ignored.</div>'
-  +'</div>';
-}
-function syncRangeUI(){
-  const pop=document.getElementById('pop_ym');
-  if(pop)pop.classList.toggle('rngon',rangeOn());
-  const a=document.getElementById('dr_from'), b=document.getElementById('dr_to');
-  if(a)a.value=DR.from; if(b)b.value=DR.to;
-  document.querySelectorAll('#pop_ym .pre button').forEach(x=>
-    x.classList.toggle('on',!!DR.preset&&x.dataset.p===DR.preset));
-  syncLbl('ym');
-}
-function setRange(ev){ if(ev)ev.stopPropagation();
-  const a=document.getElementById('dr_from'), b=document.getElementById('dr_to');
-  let f=a?a.value:'', t=b?b.value:'';
-  if(f&&t&&f>t){const x=f;f=t;t=x;}          /* tolerate a reversed range */
-  DR={from:f,to:t,preset:''};
-  syncRangeUI(); render();
-}
-function clearRange(ev){ if(ev)ev.stopPropagation();
-  DR={from:'',to:'',preset:''};
-  syncRangeUI(); render();
-}
-function preset(k,ev){ if(ev)ev.stopPropagation();
-  const T=new Date(); let f;
-  if(k==='30'){f=new Date(T);f.setDate(f.getDate()-29);}
-  else if(k==='90'){f=new Date(T);f.setDate(f.getDate()-89);}
-  else if(k==='mtd'){f=new Date(T.getFullYear(),T.getMonth(),1);}
-  else if(k==='qtd'){f=new Date(T.getFullYear(),Math.floor(T.getMonth()/3)*3,1);}
-  else if(k==='ytd'){f=new Date(T.getFullYear(),0,1);}
-  else if(k==='fy'){f=new Date(T.getMonth()>=3?T.getFullYear():T.getFullYear()-1,3,1);}
-  else return clearRange();
-  DR={from:isoL(f),to:isoL(T),preset:k};
-  syncRangeUI(); render();
-}
-
 function rebuildFilters(){
   FDEFS.forEach(d=>{
     const counts=new Map();
@@ -564,8 +484,7 @@ function rebuildFilters(){
     const host=document.getElementById('dd_'+d.id);
     host.innerHTML=
       `<button onclick="popOpen('${d.id}',event)"><b>${esc(d.lab)}</b><s id="lbl_${d.id}"></s></button>
-       <div class="pop${d.id==='ym'&&rangeOn()?' rngon':''}" id="pop_${d.id}">
-         ${d.id==='ym'?rangeHTML():''}
+       <div class="pop" id="pop_${d.id}">
          <input class="s" placeholder="Filter…" oninput="popFilter('${d.id}',this.value)">
          <div class="acts"><button onclick="popAll('${d.id}',1)">Select all</button>
            <button onclick="popAll('${d.id}',0)">Clear</button></div>
@@ -580,14 +499,7 @@ function rebuildFilters(){
 function syncLbl(id){
   const s=F[id], el=document.getElementById('lbl_'+id);
   const host=document.getElementById('dd_'+id);
-  if(!el||!host)return;
   const def=FDEFS.find(d=>d.id===id), dsp=v=>def&&def.disp?def.disp(v):v;
-  if(id==='ym'&&rangeOn()){
-    el.textContent=(DR.from?dLab(DR.from):'Earliest')+' \u2192 '+(DR.to?dLab(DR.to):'Latest');
-    el.title=el.textContent+' (CV date)';
-    host.classList.add('act');return;
-  }
-  el.title='';
   if(!s.size){el.textContent='All';host.classList.remove('act');}
   else{el.textContent=s.size===1?dsp([...s][0]):s.size+' selected';host.classList.add('act');}
 }
@@ -608,21 +520,12 @@ function popAll(id,on){
   if(on&&F[id].size===document.querySelectorAll('#list_'+id+' label').length)F[id].clear();
   syncLbl(id);render();}
 function resetF(){FDEFS.forEach(d=>F[d.id].clear());FQ='';document.getElementById('fq').value='';
-  DR={from:'',to:'',preset:''}; syncRangeUI();
   document.querySelectorAll('.pop input[type=checkbox]').forEach(c=>c.checked=false);
   FDEFS.forEach(d=>syncLbl(d.id));render();}
 
 function apply(){
-  const ron=rangeOn(), rf=DR.from, rt=DR.to;   /* ISO strings compare correctly as text */
-  return C.filter(r=>{
-    if(ron){
-      if(!r.cvd)return false;                  /* no CV date -> cannot sit in a date range */
-      if(rf&&r.cvd<rf)return false;
-      if(rt&&r.cvd>rt)return false;
-    }
-    return FDEFS.every(d=>(ron&&d.id==='ym')||!F[d.id].size||F[d.id].has(d.key(r)||'(blank)'))
-      && (!FQ||(r.name+' '+r.pos+' '+r.code+' '+r.src+' '+r.rec+' '+r.loc).toLowerCase().includes(FQ));
-  });
+  return C.filter(r=>FDEFS.every(d=>!F[d.id].size||F[d.id].has(d.key(r)||'(blank)'))
+    && (!FQ||(r.name+' '+r.pos+' '+r.code+' '+r.src+' '+r.rec+' '+r.loc).toLowerCase().includes(FQ)));
 }
 /* Requisitions carry Department, Location, Position and an Owner that uses the same
    recruiter names as the candidate sheet — so Recruiter filters them too.
@@ -1044,12 +947,10 @@ function render(){
     (SRC_MODE==='live'?'Live from Google Sheets':'Snapshot '+SNAPSHOT.generated);
   document.getElementById('fcount').textContent=
     f0(d.length)+' of '+f0(C.length)+' candidates · '
-    +(reqFiltered()?f0(rq.length)+' of '+f0(R.length):f0(rq.length))+' requisitions'
-    +(rangeOn()?' · CV date '+(DR.from?dLab(DR.from):'earliest')+' → '+(DR.to?dLab(DR.to):'latest'):'');
+    +(reqFiltered()?f0(rq.length)+' of '+f0(R.length):f0(rq.length))+' requisitions';
   document.getElementById('fcount').title=
     'Department, Recruiter, Location and Position filter both sheets. '
-    +'Source, Status and Period apply to candidates only — a requisition has no source or status of its own. '
-    +'A custom date range filters candidates on CV date and replaces the month selection.';
+    +'Source, Status and Period apply to candidates only — a requisition has no source or status of its own.';
   kstrip(d,m,rq);
   document.getElementById('kfs').innerHTML=insights(d,m,rq).map(i=>
     `<div class="kfc" style="--c:${i.c}"><div class="t">${i.t}</div><div class="d">${i.d}</div></div>`).join('')
@@ -1118,9 +1019,12 @@ function pgOv(d,m,rq){
     tile('Projected days to fill the seats still open','Days to fill one person × seats remaining, for open requisitions',
       (proj.length?hbar(proj,{fmt:v=>f0(v)+' d',color:P[3],lw:126,drill:'posreq'}):EMPTY),
       '','Projected at the pace this role has hired so far. Anything beyond about 90 days will not close by waiting — it needs a different channel, a revised specification or a pay-band review.'),
-    tile('Source yield','Share of each channel\'s CVs that became a hire',
-      hbar(srcG.filter(s=>s.cv>=5).map(s=>({k:s.k,v:pct(s.jn,s.cv),note:s.jn+'/'+s.cv})).sort((a,b)=>b.v-a.v),
-        {fmt:v=>f1(v)+'%',color:P[1],drill:'src'})),
+    tile('Source mix of hires','Share of everyone who joined, by the channel they came from',
+      (m.jn?hbar(srcG.filter(s=>s.jn>0).map(s=>({k:s.k,v:pct(s.jn,m.jn),note:s.jn+' of '+m.jn})).sort((a,b)=>b.v-a.v),
+        {fmt:v=>f1(v)+'%',color:P[1],drill:'src'}):EMPTY),
+      '','Measured against the '+f0(m.jn)+' people who actually joined, so these shares add up to 100%. '
+        +'This says where your hires come from — it does not say which channel is most efficient, '
+        +'because a channel that sends a huge volume of CVs will rank high here even with a poor conversion rate.'),
     tile('Requisition fill status by department','Sanctioned headcount vs on board vs still open',
       ghbar(dG,[{k:'nos',n:'Sanctioned',c:P[0]},{k:'onb',n:'On board',c:P[1]},{k:'bal',n:'Still open',c:P[3]}],{drill:'deptreqout'})),
     tile('Candidate status mix','Click a slice for the list',donut(stG,{drill:'status'})),
