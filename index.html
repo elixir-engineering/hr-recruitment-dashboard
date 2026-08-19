@@ -57,8 +57,10 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Segoe UI",system-ui,-a
 .pop label{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--tx2)}
 .pop label:hover{background:var(--pnl2);color:var(--tx)}
 .pop label input{accent-color:var(--a1);cursor:pointer;flex-shrink:0}
-.pop label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.pop label span{flex:1;overflow-wrap:anywhere}
 .pop label em{font-style:normal;color:var(--tx3);font-size:10.5px}
+.dd>button s[title]{cursor:help}
+text[data-full]{cursor:help}
 .fsearch{background:var(--pnl);border:1px solid var(--line);color:var(--tx);height:29px;border-radius:6px;
  padding:0 10px;font:12px inherit;width:170px}
 .fsearch:focus{outline:none;border-color:var(--a1)}
@@ -68,9 +70,10 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Segoe UI",system-ui,-a
 .kc{background:var(--pnl);border:1px solid var(--line);border-radius:7px;padding:7px 10px;box-shadow:var(--sh);
  border-left:2.5px solid var(--c,var(--a1));min-width:0}
 .kc .l{font-size:9px;text-transform:uppercase;letter-spacing:.6px;color:var(--tx3);font-weight:700;
- white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ line-height:1.3;overflow-wrap:anywhere}
 .kc .v{font-size:19px;font-weight:700;letter-spacing:-.6px;color:var(--c,var(--tx));line-height:1.25}
-.kc .n{font-size:9.5px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* wraps to as many lines as it needs — grid rows stretch together so the cards stay level */
+.kc .n{font-size:9.5px;color:var(--tx2);line-height:1.35;overflow-wrap:anywhere}
 
 /* ---------- tabs ---------- */
 .tabs{display:flex;gap:2px;padding:9px 16px 0;flex-shrink:0}
@@ -110,7 +113,7 @@ body.dense .kstrip{padding-top:7px}
 .kf .kfs::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 .kf .kfc{border-left:2.5px solid var(--c,var(--a1));background:var(--pnl2);border-radius:0 5px 5px 0;
  padding:5px 9px;min-width:265px;max-width:340px;flex-shrink:0}
-.kf .kfc .t{font-weight:670;font-size:10.5px;color:var(--c,var(--tx));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kf .kfc .t{font-weight:670;font-size:10.5px;color:var(--c,var(--tx));line-height:1.3;overflow-wrap:anywhere}
 .kf .kfc .d{font-size:10.5px;color:var(--tx2);line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;
  -webkit-box-orient:vertical;overflow:hidden}
 body.kfoff .kf .kfs{display:none}
@@ -233,6 +236,10 @@ const f0=x=>x==null?'–':Math.round(x).toLocaleString('en-IN');
 const inr=x=>x==null?'–':'₹'+Math.round(x).toLocaleString('en-IN');
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const cut=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s;};
+/* an SVG row label: shortened to fit, but the untruncated text stays reachable on hover */
+function blab(x,y,txt,n,anchor){const t=String(txt==null?'':txt), sh=t.length>n;
+  return `<text class="bl" x="${x}" y="${y}" text-anchor="${anchor||'end'}"${sh?' data-full="1"':''}>`
+    +esc(cut(t,n))+(sh?`<title>${esc(t)}</title>`:'')+`</text>`;}
 function med(a){a=a.filter(x=>x!=null&&!isNaN(x)).sort((x,y)=>x-y);if(!a.length)return null;
  const m=a.length>>1;return a.length%2?a[m]:(a[m-1]+a[m])/2;}
 function grp(rows,k){const m=new Map();rows.forEach(r=>{const key=k(r)||'(blank)';
@@ -499,7 +506,7 @@ function rebuildFilters(){
          <div class="acts"><button onclick="popAll('${d.id}',1)">Select all</button>
            <button onclick="popAll('${d.id}',0)">Clear</button></div>
          <div class="list" id="list_${d.id}">`+
-      vals.map(v=>`<label data-v="${esc(dsp(v))}"><input type="checkbox" value="${esc(v)}"
+      vals.map(v=>`<label data-v="${esc(dsp(v))}" title="${esc(dsp(v))}"><input type="checkbox" value="${esc(v)}"
           ${F[d.id].has(v)?'checked':''} onchange="popTick('${d.id}',this)">
           <span>${esc(dsp(v))}</span><em>${counts.get(v)}</em></label>`).join('')+
       `</div></div>`;
@@ -510,8 +517,11 @@ function syncLbl(id){
   const s=F[id], el=document.getElementById('lbl_'+id);
   const host=document.getElementById('dd_'+id);
   const def=FDEFS.find(d=>d.id===id), dsp=v=>def&&def.disp?def.disp(v):v;
-  if(!s.size){el.textContent='All';host.classList.remove('act');}
-  else{el.textContent=s.size===1?dsp([...s][0]):s.size+' selected';host.classList.add('act');}
+  if(!s.size){el.textContent='All';el.title=def?'All '+def.lab.toLowerCase()+' values':'All';
+    host.classList.remove('act');}
+  else{el.textContent=s.size===1?dsp([...s][0]):s.size+' selected';
+    el.title=[...s].map(dsp).join(', ');        // "3 selected" -> hover lists which three
+    host.classList.add('act');}
 }
 function popOpen(id,ev){ev.stopPropagation();
   document.querySelectorAll('.pop.open').forEach(p=>{if(p.id!=='pop_'+id)p.classList.remove('open')});
@@ -754,7 +764,7 @@ function hbar(items,o){o=o||{};
   let s='';
   items.forEach((it,i)=>{
     const y=i*rh+3, bl=Math.max(2,it.v/mx*bw), c=it.c||o.color||P[i%P.length];
-    s+=`<text class="bl" x="${lw-6}" y="${y+11}" text-anchor="end">${esc(cut(it.k,Math.floor(lw/5.6)))}</text>`;
+    s+=blab(lw-6,y+11,it.k,Math.floor(lw/5.6));
     s+=`<rect x="${lw}" y="${y+2}" width="${bl}" height="${rh-7}" rx="2.5" fill="${c}" opacity=".85"${DA(o,it.dk!=null?it.dk:it.k)}><title>${esc(it.k)}: ${fmt(it.v)}${it.note?' — '+esc(it.note):''}${o.drill?' · click for the list':''}</title></rect>`;
     s+=`<text class="bv" x="${lw+bl+5}" y="${y+11}">${fmt(it.v)}`
       +(o.showNote&&it.note?`<tspan fill="var(--tx3)" font-weight="400" font-size="9.5"> ${esc(it.note)}</tspan>`:'')
@@ -769,7 +779,7 @@ function ghbar(items,ser,o){o=o||{};
   let s='';
   items.forEach((it,i)=>{
     const y0=i*blk+4;
-    s+=`<text class="bl" x="${lw-6}" y="${y0+blk/2-1}" text-anchor="end">${esc(cut(it.k,Math.floor(lw/5.6)))}</text>`;
+    s+=blab(lw-6,y0+blk/2-1,it.k,Math.floor(lw/5.6));
     ser.forEach((se,j)=>{const v=it[se.k]||0,bl=Math.max(1,v/mx*bw),y=y0+j*rh;
       s+=`<rect x="${lw}" y="${y}" width="${bl}" height="${rh-2.5}" rx="1.5" fill="${se.c}" opacity=".9"${DA(o,(it.dk!=null?it.dk:it.k)+'|'+se.k)}><title>${esc(it.k)} — ${se.n}: ${f0(v)}${o.drill?' · click for the list':''}</title></rect>`;
       s+=`<text class="bv" x="${lw+bl+4}" y="${y+rh-3}" font-size="9">${f0(v)}</text>`;});
@@ -782,7 +792,7 @@ function stack100(items,keys,o){o=o||{};
   let s='';
   items.forEach((it,i)=>{
     const y=i*rh+3, tot=keys.reduce((a,k)=>a+(it[k.k]||0),0)||1; let x=lw;
-    s+=`<text class="bl" x="${lw-6}" y="${y+11}" text-anchor="end">${esc(cut(it.k,Math.floor(lw/5.6)))}</text>`;
+    s+=blab(lw-6,y+11,it.k,Math.floor(lw/5.6));
     keys.forEach(kk=>{const v=it[kk.k]||0; if(!v)return; const bl=v/tot*bw;
       s+=`<rect x="${x}" y="${y+2}" width="${bl}" height="${rh-7}" fill="${kk.c}" opacity=".88"${DA(o,(it.dk!=null?it.dk:it.k)+'|'+kk.k)}><title>${esc(it.k)} — ${kk.n}: ${v} (${f1(v/tot*100)}%)${o.drill?' · click for the list':''}</title></rect>`;
       if(bl>20)s+=`<text x="${x+bl/2}" y="${y+11}" text-anchor="middle" font-size="9" fill="#fff" font-weight="650">${v}</text>`;
@@ -827,7 +837,8 @@ function donut(items,o){o=o||{};
   // legend with swatch, label, count and share
   items.forEach((it,i)=>{const y=13+i*15.5, c=it.c||P[i%P.length];
     s+=`<rect x="166" y="${y-8}" width="9" height="9" rx="2.5" fill="${c}"/>`;
-    s+=`<text x="180" y="${y}" font-size="10" fill="var(--tx2)">${esc(cut(it.k,16))}</text>`;
+    s+=`<text x="180" y="${y}" font-size="10" fill="var(--tx2)"${String(it.k).length>16?' data-full="1"':''}>`
+      +esc(cut(it.k,16))+(String(it.k).length>16?`<title>${esc(it.k)}</title>`:'')+`</text>`;
     s+=`<text x="${w-30}" y="${y}" font-size="10" text-anchor="end" fill="var(--tx)" font-weight="650">${it.v}</text>`;
     s+=`<text x="${w-2}" y="${y}" font-size="9" text-anchor="end" fill="var(--tx3)">${f1(it.v/tot*100)}%</text>`;});
   return S(w,h,s);
@@ -989,7 +1000,8 @@ function kstrip(d,m,rq){
     ['Days to fill one',fpm==null?'–':f1(fpm)+' d','median, per person placed','var(--a8)'],
   ];
   document.getElementById('kstrip').innerHTML=K.map(([l,v,n,c])=>
-    `<div class="kc" style="--c:${c}"><div class="l">${l}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
+    `<div class="kc" style="--c:${c}"><div class="l" title="${esc(l)}">${l}</div>`
+    +`<div class="v" title="${esc(l)}: ${esc(v)}">${v}</div><div class="n" title="${esc(n)}">${n}</div></div>`).join('');
 }
 
 /* ---- page: overview ----
