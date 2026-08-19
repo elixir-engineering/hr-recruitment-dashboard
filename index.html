@@ -244,6 +244,15 @@ const avg=a=>{a=a.filter(x=>x!=null&&!isNaN(x));return a.length?a.reduce((s,x)=>
 const deptMatch=(a,b)=>{a=String(a||'').toLowerCase();b=String(b||'').toLowerCase();
   return a===b||a.includes(b)||b.includes(a);};
 
+/* ---- the month a hire actually STARTED, not the month their CV arrived ----
+   Joining date is the truth. Where the sheet has no joining date but the person is
+   marked Joined / Joined & Left, the selection date stands in and the figure is
+   flagged in the UI as estimated so it gets corrected at source. Anyone who never
+   joined has no joining month at all and is simply absent from these series. */
+const jmon=r=>!r.joined?null:(r.jd?r.jd.slice(0,7):(r.seld?r.seld.slice(0,7):null));
+const jest=r=>!!(r.joined&&!r.jd&&r.seld);              // month inferred from selection date
+const jgap=r=>!!(r.joined&&!r.jd&&!r.seld);             // no usable date at all
+
 /* month labels: "2026-06" -> "Jun 2026" / "Jun" */
 const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function monLab(ym,short){
@@ -986,7 +995,7 @@ function kstrip(d,m,rq){
 /* ---- page: overview ----
    Each visual here appears nowhere else in the dashboard. */
 function pgOv(d,m,rq){
-  const ms=uniq(d.map(r=>r.ym));
+  const ms=uniq([...d.map(r=>r.ym),...d.map(jmon)]);   // CV months + joining months
   const srcG=[...grp(d,r=>r.src)].map(([k,v])=>({k,cv:v.length,jn:cnt(v,r=>r.joined)}));
   const stG=[...grp(d,r=>r.status)].map(([k,v])=>({k:stLabel(k),dk:k,v:v.length,c:stColor(k),rk:stRank(k)}))
     .sort((a,b)=>a.rk-b.rk);           // ordered by position in the process, not by size
@@ -1015,10 +1024,13 @@ function pgOv(d,m,rq){
     tile('Hiring funnel','Every CV in the tracker and where it ended up',
       funnel([{k:'CVs',v:m.cv},{k:'Interviewed',v:m.iv},{k:'Reached selection',dk:'Selected',v:m.sl},
               {k:'Joined',v:m.jn},{k:'Still with us',dk:'Retained',v:m.rt}],{drill:'stage'})),
-    tile('CVs vs selected vs joined','By month the CV was received',
+    tile('CVs vs selected vs joined','CVs and selections by CV month · joins by the month the person started',
       lines(ms.map(x=>monLab(x,1)),[{n:'CVs',c:P[0],v:ms.map(x=>cnt(d,r=>r.ym===x))},
         {n:'Reached selection',c:P[2],v:ms.map(x=>cnt(d,r=>r.ym===x&&r.selected))},
-        {n:'Joined',c:P[1],v:ms.map(x=>cnt(d,r=>r.ym===x&&r.joined))}])),
+        {n:'Joined',c:P[1],v:ms.map(x=>cnt(d,r=>jmon(r)===x))}]),
+      '','The joined line is plotted on joining date, so a July CV who started in August counts in August. '
+        +'The other two lines follow the CV date, which is the only date those candidates have. '
+        +'That means the three lines are not a single cohort moving left to right — read each on its own.'),
     tile('Days to fill one person','How many days it takes to put a single person into this role',
       (perPos.length?hbar(perPos,{fmt:v=>f1(v)+' d',color:P[4],lw:126,drill:'posreq'}):EMPTY),
       '',fillNote),
@@ -1042,7 +1054,7 @@ function pgOv(d,m,rq){
 
 /* ---- page: funnel ---- */
 function pgFn(d,m){
-  const ms=uniq(d.map(r=>r.ym));
+  const ms=uniq([...d.map(r=>r.ym),...d.map(jmon)]);   // CV months + joining months
   const open=d.filter(r=>r.active&&r.cvd), T=new Date();
   const age=r=>Math.round((T-new Date(r.cvd))/864e5);
   const backlog=[...grp(open,r=>r.rec)].map(([k,v])=>({k,
@@ -1113,11 +1125,19 @@ function pgFn(d,m){
       hbar(gap,{fmt:v=>f1(v)+' d',color:P[5],lw:132,drill:'gappos'}),
       '','This is the window in which counter-offers land and candidates disappear. Roles with the longest gap are where offer drop-off is most likely, so they are the ones worth chasing weekly during notice.'),
     tile('Monthly funnel','CVs, interviews, selections and joins by month',
-      tbl('t_mon',[{t:'Month'},{t:'CVs',n:1},{t:'Interviewed',n:1},{t:'Reached selection',n:1},{t:'Joined',n:1},
+      tbl('t_mon',[{t:'Month'},{t:'CVs',n:1},{t:'Interviewed',n:1},{t:'Reached selection',n:1},
+        {t:'Joined in month',n:1},{t:'Joined from this cohort',n:1},
         {t:'CV→Join',n:1},{t:'Drop-off',n:1},{t:'Median days CV→join',n:1}],
         ms.map(x=>{const g=d.filter(r=>r.ym===x),mm=M(g);
-          return [{s:x,h:esc(monLab(x))},mm.cv,mm.iv,mm.sl,nv(mm.jn,'g'),nv(mm.cv2j,mm.cv2j>=15?'g':'r',v=>f1(v)+'%'),
-                  nv(mm.sl?mm.drop:null,mm.drop>40?'r':'',v=>f1(v)+'%'),nv(mm.tat)];}))),
+          const started=cnt(d,r=>jmon(r)===x), est=cnt(d,r=>jmon(r)===x&&jest(r));
+          return [{s:x,h:esc(monLab(x))},mm.cv,mm.iv,mm.sl,
+                  {s:started,h:'<b>'+f0(started)+'</b>'+(est?' <span title="'+est+' of these have no joining date on the sheet — selection date used instead" style="color:var(--a3)">*'+est+'</span>':'')},
+                  nv(mm.jn,'g'),nv(mm.cv2j,mm.cv2j>=15?'g':'r',v=>f1(v)+'%'),
+                  nv(mm.sl?mm.drop:null,mm.drop>40?'r':'',v=>f1(v)+'%'),nv(mm.tat)];})),
+      '','"Joined in month" counts people who actually started that month — this is your headcount figure. '
+        +'Every other column is the CV cohort for that month: of the CVs that arrived, how many were interviewed, '
+        +'selected and eventually joined whenever that happened. The two joined columns will not match, and should not. '
+        +'A * marks joins whose month came from the selection date because the joining date is blank on the sheet.'),
     tile('Conversion rate by month','Is the funnel getting better or worse?',
       lines(ms.map(x=>monLab(x,1)),[
         {n:'CV → Join %',c:P[1],v:ms.map(x=>{const g=d.filter(r=>r.ym===x);return pct(cnt(g,r=>r.joined),g.length);})},
@@ -1134,7 +1154,7 @@ function pgFn(d,m){
 
 /* ---- page: recruiter & source ROI ---- */
 function pgRoi(d,m){
-  const ms=uniq(d.map(r=>r.ym));
+  const ms=uniq([...d.map(r=>r.ym),...d.map(jmon)]);   // CV months + joining months
   const rec=[...grp(d,r=>r.rec)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv);
   const src=[...grp(d,r=>r.src)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv);
   const pan=[...grp(d,r=>r.panel)].map(([k,v])=>({k,...M(v)})).filter(p=>p.iv>0).sort((a,b)=>b.iv-a.iv);
@@ -1161,9 +1181,9 @@ function pgRoi(d,m){
         {k:'jn',n:'Joined',c:P[1]}],{drill:'recout'}),
       '','"Reached selection" counts everyone who got to selection or beyond, which necessarily includes those who went on to join. '
         +'Where the two bars are equal it means every candidate that recruiter put forward for selection actually joined — a perfect conversion, not a duplicate.'),
-    tile('Hires per recruiter, by month','Who is actually closing, and when',
+    tile('Hires per recruiter, by month','By the month the hire actually started',
       lines(ms.map(x=>monLab(x,1)),
-        rec.slice(0,4).map((rr,i)=>({n:rr.k,c:P[i],v:ms.map(x=>cnt(d,r=>r.ym===x&&r.rec===rr.k&&r.joined))})))),
+        rec.slice(0,4).map((rr,i)=>({n:rr.k,c:P[i],v:ms.map(x=>cnt(d,r=>jmon(r)===x&&r.rec===rr.k))})))),
     tile('Outcome mix by source','Share of each channel\'s candidates by final outcome',
       stack100(mix,[{k:'joined',n:'Joined',c:P[1]},{k:'sel',n:'Sel, not joined',c:P[2]},
         {k:'act',n:'In pipeline',c:P[0]},{k:'lost',n:'Lost',c:P[3]}],{drill:'srcout'})),
