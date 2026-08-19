@@ -64,7 +64,7 @@ body{background:var(--bg);color:var(--tx);font:13px/1.45 "Segoe UI",system-ui,-a
 .fsearch:focus{outline:none;border-color:var(--a1)}
 
 /* ---------- kpi strip ---------- */
-.kstrip{display:grid;grid-template-columns:repeat(9,1fr);gap:7px;padding:9px 16px 0;flex-shrink:0}
+.kstrip{display:grid;grid-template-columns:repeat(8,1fr);gap:7px;padding:9px 16px 0;flex-shrink:0}
 .kc{background:var(--pnl);border:1px solid var(--line);border-radius:7px;padding:7px 10px;box-shadow:var(--sh);
  border-left:2.5px solid var(--c,var(--a1));min-width:0}
 .kc .l{font-size:9px;text-transform:uppercase;letter-spacing:.6px;color:var(--tx3);font-weight:700;
@@ -961,17 +961,22 @@ function render(){
     PAGE==='pos'?pgPos(d,m,rq):PAGE==='sal'?pgSal(d,m):pgRec(d);
 }
 function kstrip(d,m,rq){
-  const open=rq.filter(q=>q.status==='OPEN'), fpm=fillMedian(rq);
+  const fpm=fillMedian(rq);
+  /* Requisition-side headcount, taken from the requisition sheet's own columns:
+     sanctioned = on board + still open. This is the truer count of people placed —
+     the candidate tracker under-records bulk TFM hiring. */
+  const sanc=sum(rq,q=>q.nos), onb=sum(rq,q=>q.onboard), bal=sum(rq,q=>q.bal);
   const K=[
     ['CVs received',f0(m.cv),'candidates screened','var(--a1)'],
     ['Interviewed',f0(m.iv),f1(m.c2i)+'% of CVs','var(--a6)'],
     ['Reached selection',f0(m.sl),'incl. those who joined · '+f1(m.i2s)+'% of interviewed','var(--a3)'],
-    /* the two are mutually exclusive — 'Joined' counts only those still with the company */
-    ['Joined',f0(m.rt),'still with us · '+f1(pct(m.rt,m.cv))+'% of CVs','var(--a2)'],
-    ['Joined & left',f0(m.lf),m.jn?f1(m.attr)+'% of '+f0(m.jn)+' total hires':'no hires yet','var(--a4)'],
+    /* headline is every hire ever made; the split between still-here and left sits underneath */
+    ['Total joined',f0(m.jn),
+      m.jn?f0(m.rt)+' still with us · '+f0(m.lf)+' joined & left ('+f1(m.attr)+'%)':'no hires yet','var(--a2)'],
     ['In pipeline',f0(m.ac),'awaiting decision','var(--a5)'],
     ['Offer drop-off',f1(m.drop)+'%',f0(m.sl-m.jn)+' never joined','var(--a3)'],
-    ['Open positions',f0(sum(open,q=>q.bal)),open.length+' open requisitions','var(--a7)'],
+    ['Positions filled',f0(onb),
+      sanc?f0(bal)+' still open · of '+f0(sanc)+' sanctioned':'no requisitions','var(--a7)'],
     ['Days to fill one',fpm==null?'–':f1(fpm)+' d','median, per person placed','var(--a8)'],
   ];
   document.getElementById('kstrip').innerHTML=K.map(([l,v,n,c])=>
