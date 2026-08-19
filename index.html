@@ -517,10 +517,13 @@ function syncLbl(id){
   const s=F[id], el=document.getElementById('lbl_'+id);
   const host=document.getElementById('dd_'+id);
   const def=FDEFS.find(d=>d.id===id), dsp=v=>def&&def.disp?def.disp(v):v;
-  if(!s.size){el.textContent='All';el.title=def?'All '+def.lab.toLowerCase()+' values':'All';
+  const basis=id==='ym'
+    ? ' · months come from the CV date; the Total joined card and the monthly join lines use the joining date instead'
+    : '';
+  if(!s.size){el.textContent='All';el.title=(def?'All '+def.lab.toLowerCase()+' values':'All')+basis;
     host.classList.remove('act');}
   else{el.textContent=s.size===1?dsp([...s][0]):s.size+' selected';
-    el.title=[...s].map(dsp).join(', ');        // "3 selected" -> hover lists which three
+    el.title=[...s].map(dsp).join(', ')+basis;  // "3 selected" -> hover lists which three
     host.classList.add('act');}
 }
 function popOpen(id,ev){ev.stopPropagation();
@@ -545,6 +548,16 @@ function resetF(){FDEFS.forEach(d=>F[d.id].clear());FQ='';document.getElementByI
 
 function apply(){
   return C.filter(r=>FDEFS.every(d=>!F[d.id].size||F[d.id].has(d.key(r)||'(blank)'))
+    && (!FQ||(r.name+' '+r.pos+' '+r.code+' '+r.src+' '+r.rec+' '+r.loc).toLowerCase().includes(FQ)));
+}
+/* Same filters as apply(), except the Period dimension is read off the month the person
+   JOINED rather than the month their CV arrived. Anything answering "how many joined in
+   this period" must use this: a July CV who started in August belongs to August.
+   Candidates who never joined have no joining month and drop out, which is correct here. */
+function applyJ(){
+  return C.filter(r=>FDEFS.every(d=>d.id==='ym'
+      ? (!F.ym.size||F.ym.has(jmon(r)||'(no date)'))
+      : (!F[d.id].size||F[d.id].has(d.key(r)||'(blank)')))
     && (!FQ||(r.name+' '+r.pos+' '+r.code+' '+r.src+' '+r.rec+' '+r.loc).toLowerCase().includes(FQ)));
 }
 /* Requisitions carry Department, Location, Position and an Owner that uses the same
@@ -986,22 +999,27 @@ function kstrip(d,m,rq){
      sanctioned = on board + still open. This is the truer count of people placed —
      the candidate tracker under-records bulk TFM hiring. */
   const sanc=sum(rq,q=>q.nos), onb=sum(rq,q=>q.onboard), bal=sum(rq,q=>q.bal);
+  /* joined counts follow the joining date, so Period=Aug means "started in August" */
+  const mj=M(applyJ()), perOn=F.ym.size?' in the selected period':'';
   const K=[
     ['CVs received',f0(m.cv),'candidates screened','var(--a1)'],
     ['Interviewed',f0(m.iv),f1(m.c2i)+'% of CVs','var(--a6)'],
     ['Reached selection',f0(m.sl),'incl. those who joined · '+f1(m.i2s)+'% of interviewed','var(--a3)'],
     /* headline is every hire ever made; the split between still-here and left sits underneath */
-    ['Total joined',f0(m.jn),
-      m.jn?f0(m.rt)+' still with us · '+f0(m.lf)+' joined & left ('+f1(m.attr)+'%)':'no hires yet','var(--a2)'],
+    ['Total joined',f0(mj.jn),
+      mj.jn?f0(mj.rt)+' still with us · '+f0(mj.lf)+' joined & left ('+f1(mj.attr)+'%)':'no hires yet','var(--a2)',
+      'Counted by the month the person actually joined'+perOn+', not by when their CV arrived. '
+      +'A July CV who started in August counts in August. The other cards on this strip follow the CV date, '
+      +'so this figure will not equal Reached selection minus drop-off for the same period.'],
     ['In pipeline',f0(m.ac),'awaiting decision','var(--a5)'],
     ['Offer drop-off',f1(m.drop)+'%',f0(m.sl-m.jn)+' never joined','var(--a3)'],
     ['Positions filled',f0(onb),
       sanc?f0(bal)+' still open · of '+f0(sanc)+' sanctioned':'no requisitions','var(--a7)'],
     ['Days to fill one',fpm==null?'–':f1(fpm)+' d','median, per person placed','var(--a8)'],
   ];
-  document.getElementById('kstrip').innerHTML=K.map(([l,v,n,c])=>
-    `<div class="kc" style="--c:${c}"><div class="l" title="${esc(l)}">${l}</div>`
-    +`<div class="v" title="${esc(l)}: ${esc(v)}">${v}</div><div class="n" title="${esc(n)}">${n}</div></div>`).join('');
+  document.getElementById('kstrip').innerHTML=K.map(([l,v,n,c,hint])=>
+    `<div class="kc" style="--c:${c}" title="${esc(hint||(l+': '+v))}">`
+    +`<div class="l">${l}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
 }
 
 /* ---- page: overview ----
