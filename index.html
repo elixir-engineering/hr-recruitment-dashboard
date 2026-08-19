@@ -87,9 +87,6 @@ text[data-full]{cursor:help}
 .g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;padding-top:9px}
 .g4>.w2{grid-column:span 2}
 .g4>.w4{grid-column:1/-1}          /* full-width row, e.g. the stacked record tables */
-.cnote{background:rgba(245,165,36,.09);border:1px solid rgba(245,165,36,.35);border-radius:7px;
- padding:7px 11px;font-size:10.5px;color:var(--tx2);line-height:1.45}
-.cnote b{color:var(--a3)}
 @media(max-width:1500px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.kstrip{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:820px){.g4{grid-template-columns:1fr}.g4>.w2,.g4>.w4{grid-column:span 1}.kstrip{grid-template-columns:repeat(2,1fr)}}
 .tile{background:var(--pnl);border:1px solid var(--line);border-radius:8px;box-shadow:var(--sh);
@@ -485,7 +482,7 @@ function startAuto(){if(!AUTO)AUTO=setInterval(()=>loadLive(0),AUTOMS);}
 
 /* ---------------- filters ---------------- */
 const FDEFS=[
-  {id:'ym',   lab:'Period',     key:r=>periodKey(r)||(BASIS==='jd'?'(not joined yet)':'(no date)'), disp:monLab},
+  {id:'ym',   lab:'Period',     key:r=>r.ym||'(no date)', disp:monLab},
   {id:'rec',  lab:'Recruiter',  key:r=>r.rec},
   {id:'src',  lab:'Source',     key:r=>r.src},
   {id:'dept', lab:'Department', key:r=>r.dept},
@@ -502,23 +499,15 @@ let F={}; FDEFS.forEach(d=>F[d.id]=new Set()); let FQ='';
    what this is set to, because their percentages divide joins by a CV population and
    would be meaningless otherwise. Those tabs are labelled accordingly. */
 let BASIS='jd';
-const periodKey=r=>BASIS==='jd'?jmon(r):r.ym;
-let DC=[], MC=null;                  // the always-CV-cohort view, rebuilt on every render
-function toggleBasis(){BASIS=BASIS==='jd'?'cv':'jd';rebuildFilters();render();}
-/* banner shown on the cohort tabs whenever the Period filter is on joining month,
-   so nobody wonders why these figures differ from the KPI strip above */
-function cohortNote(){
-  return (BASIS==='jd'&&F.ym.size)
-    ? `<div class="cnote w4">This tab measures the <b>CV cohort</b> — of the CVs received in the selected
-        period, what happened to them. The KPI strip above counts people by <b>joining month</b>, so the
-        two will not match. Conversion and drop-off percentages are only valid on the CV cohort.</div>`
-    : '';}
+let DJ=[], MJ=null;                  // the joins view, rebuilt on every render
+function toggleBasis(){BASIS=BASIS==='jd'?'cv':'jd';render();}
 function basisLbl(){
-  document.getElementById('basisBtn').textContent=
-    BASIS==='jd'?'Period: joining date':'Period: CV date';
-  document.getElementById('basisBtn').title=BASIS==='jd'
-    ? 'Period selects people by the month they JOINED. Funnel, ROI, Positions and Salary tabs stay on the CV cohort — click to switch everything to CV date.'
-    : 'Period selects people by the month their CV arrived, everywhere. Click to switch the KPI strip, hire counts and records back to joining date.';
+  const b=document.getElementById('basisBtn');
+  b.textContent=BASIS==='jd'?'Joins by: joining date':'Joins by: CV date';
+  b.title=BASIS==='jd'
+    ? 'Joined / Still with us / Joined & left count people by the month they actually started. '
+      +'Everything else — CVs, interviews, selections, pipeline, drop-off — is the CV cohort for the selected period. Click to put joins on CV date too.'
+    : 'Every figure, joins included, is the CV cohort for the selected period. Click to count joins by the month they actually started.';
 }
 
 function rebuildFilters(){
@@ -580,12 +569,14 @@ function apply(){
   return C.filter(r=>FDEFS.every(d=>!F[d.id].size||F[d.id].has(d.key(r)||'(blank)'))
     && (!FQ||(r.name+' '+r.pos+' '+r.code+' '+r.src+' '+r.rec+' '+r.loc).toLowerCase().includes(FQ)));
 }
-/* Same filters as apply(), but the Period dimension is always the CV month regardless of
-   BASIS. Every conversion/funnel/pipeline visual runs off this, so those percentages keep
-   dividing joins by the CV population they actually came from. */
-function applyCv(){
+/* Same filters as apply(), except Period is matched against the month the person JOINED.
+   Only the join figures use this — Joined, Still with us, Joined & left, Source mix of hires.
+   Everything else stays on the CV cohort so conversion percentages keep dividing joins by
+   the CV population they actually came from. */
+function applyJ(){
+  const byJoin=BASIS==='jd';
   return C.filter(r=>FDEFS.every(d=>d.id==='ym'
-      ? (!F.ym.size||F.ym.has(r.ym||'(no date)'))
+      ? (!F.ym.size||F.ym.has((byJoin?jmon(r):r.ym)||'(no date)'))
       : (!F[d.id].size||F[d.id].has(d.key(r)||'(blank)')))
     && (!FQ||(r.name+' '+r.pos+' '+r.code+' '+r.src+' '+r.rec+' '+r.loc).toLowerCase().includes(FQ)));
 }
@@ -949,11 +940,11 @@ function setPage(p){PAGE=p;render();}
 
 function render(){
   const d=apply(), m=M(d), rq=applyR();
-  DC=applyCv(); MC=M(DC);           // CV-cohort companion view for the funnel/ROI tabs
+  DJ=applyJ(); MJ=M(DJ);            // joins view: same filters, Period on joining month
   basisLbl();
   DRILL={};                       // resolvers close over the currently filtered data
   const STAGE={CVs:()=>d, Interviewed:()=>d.filter(r=>r.interviewed), Selected:()=>d.filter(r=>r.selected),
-               Joined:()=>d.filter(r=>r.joined), Retained:()=>d.filter(r=>r.retained)};
+               Joined:()=>DJ.filter(r=>r.joined), Retained:()=>DJ.filter(r=>r.retained)};
   reg('stage','{k}',k=>(STAGE[k]||(()=>[]))());
   reg('conv','{k}',k=>({
     'CV → Interview':()=>d.filter(r=>r.interviewed),
@@ -1013,14 +1004,14 @@ function render(){
   document.getElementById('fcount').textContent=
     f0(d.length)+' of '+f0(C.length)+' candidates · '
     +(reqFiltered()?f0(rq.length)+' of '+f0(R.length):f0(rq.length))+' requisitions'
-    +(F.ym.size?' · period = '+(BASIS==='jd'?'joining month':'CV month'):'');
+    +(F.ym.size&&BASIS==='jd'?' · joins counted by joining month':'');
   document.getElementById('fcount').title=
     'Department, Recruiter, Location and Position filter both sheets. '
     +'Source, Status and Period apply to candidates only — a requisition has no source or status of its own. '
     +(BASIS==='jd'
-      ?'Period is on joining month: the KPI strip, Source mix of hires, Records and Export follow it. '
-       +'The Funnel, ROI, Positions and Salary tabs stay on the CV cohort so their conversion percentages remain valid.'
-      :'Period is on CV month everywhere.');
+      ?'Period selects candidates by CV month. Joined, Still with us and Joined & left instead count people by the '
+       +'month they actually started, so those figures come from a different set than the CVs beside them.'
+      :'Period selects candidates by CV month, joins included.');
   kstrip(d,m,rq);
   document.getElementById('kfs').innerHTML=insights(d,m,rq).map(i=>
     `<div class="kfc" style="--c:${i.c}"><div class="t">${i.t}</div><div class="d">${i.d}</div></div>`).join('')
@@ -1035,15 +1026,14 @@ function kstrip(d,m,rq){
      sanctioned = on board + still open. This is the truer count of people placed —
      the candidate tracker under-records bulk TFM hiring. */
   const sanc=sum(rq,q=>q.nos), onb=sum(rq,q=>q.onboard), bal=sum(rq,q=>q.bal);
-  /* joined counts follow the joining date, so Period=Aug means "started in August" */
   const perOn=F.ym.size?' in the selected period':'';
   const K=[
     ['CVs received',f0(m.cv),'candidates screened','var(--a1)'],
     ['Interviewed',f0(m.iv),f1(m.c2i)+'% of CVs','var(--a6)'],
     ['Reached selection',f0(m.sl),'incl. those who joined · '+f1(m.i2s)+'% of interviewed','var(--a3)'],
     /* headline is every hire ever made; the split between still-here and left sits underneath */
-    ['Total joined',f0(m.jn),
-      m.jn?f0(m.rt)+' still with us · '+f0(m.lf)+' joined & left ('+f1(m.attr)+'%)':'no hires yet','var(--a2)',
+    ['Total joined',f0(MJ.jn),
+      MJ.jn?f0(MJ.rt)+' still with us · '+f0(MJ.lf)+' joined & left ('+f1(MJ.attr)+'%)':'no hires yet','var(--a2)',
       (BASIS==='jd'
         ?'Counted by the month the person actually joined'+perOn+', not by when their CV arrived. '
          +'A July CV who started in August counts in August.'
@@ -1062,11 +1052,9 @@ function kstrip(d,m,rq){
 /* ---- page: overview ----
    Each visual here appears nowhere else in the dashboard. */
 function pgOv(d,m,rq){
-  /* dh/mh = hire counts, follow the Period basis · dc/mc = CV cohort, for funnel & pipeline */
-  const dh=d, mh=m, dc=DC, mc=MC;
-  d=dc; m=mc;
   const ms=uniq([...d.map(r=>r.ym),...d.map(jmon)]);   // CV months + joining months
-  const srcG=[...grp(dh,r=>r.src)].map(([k,v])=>({k,cv:v.length,jn:cnt(v,r=>r.joined)}));
+  /* hire counts come from the joins view; everything else from the CV cohort */
+  const srcG=[...grp(DJ,r=>r.src)].map(([k,v])=>({k,cv:v.length,jn:cnt(v,r=>r.joined)}));
   const stG=[...grp(d,r=>r.status)].map(([k,v])=>({k:stLabel(k),dk:k,v:v.length,c:stColor(k),rk:stRank(k)}))
     .sort((a,b)=>a.rk-b.rk);           // ordered by position in the process, not by size
   const dG=[...grp(rq,q=>q.dept||'(blank)')].map(([k,v])=>({k,nos:sum(v,q=>q.nos),onb:sum(v,q=>q.onboard),bal:sum(v,q=>q.bal)}))
@@ -1091,9 +1079,15 @@ function pgOv(d,m,rq){
     .filter(x=>x.seats||x.pipe).sort((a,b)=>b.seats-a.seats);
 
   return [
-    tile('Hiring funnel','Every CV in the tracker and where it ended up',
+    tile('Hiring funnel','CVs, interviews and selections for the period · joins by the month they started',
       funnel([{k:'CVs',v:m.cv},{k:'Interviewed',v:m.iv},{k:'Reached selection',dk:'Selected',v:m.sl},
-              {k:'Joined',v:m.jn},{k:'Still with us',dk:'Retained',v:m.rt}],{drill:'stage'})),
+              {k:'Joined',v:MJ.jn},{k:'Still with us',dk:'Retained',v:MJ.rt}],{drill:'stage'}),
+      '',(BASIS==='jd'
+        ?'The first three steps are the CV cohort for the selected period. Joined and Still with us count people '
+         +'by the month they actually started, which is what you report as headcount. Because the last two steps '
+         +'are a different set of people from the first three, the "% forward" and "lost" figures between '
+         +'Reached selection and Joined are not a true drop-off — use the Offer drop-off card for that.'
+        :'Every step is the CV cohort for the selected period, so the drop-off between steps is a true cohort drop-off.')),
     tile('CVs vs selected vs joined','CVs and selections by CV month · joins by the month the person started',
       lines(ms.map(x=>monLab(x,1)),[{n:'CVs',c:P[0],v:ms.map(x=>cnt(d,r=>r.ym===x))},
         {n:'Reached selection',c:P[2],v:ms.map(x=>cnt(d,r=>r.ym===x&&r.selected))},
@@ -1108,9 +1102,9 @@ function pgOv(d,m,rq){
       (proj.length?hbar(proj,{fmt:v=>f0(v)+' d',color:P[3],lw:126,drill:'posreq'}):EMPTY),
       '','Projected at the pace this role has hired so far. Anything beyond about 90 days will not close by waiting — it needs a different channel, a revised specification or a pay-band review.'),
     tile('Source mix of hires','Share of everyone who joined, by the channel they came from',
-      (mh.jn?hbar(srcG.filter(s=>s.jn>0).map(s=>({k:s.k,v:pct(s.jn,mh.jn),note:s.jn+' of '+mh.jn})).sort((a,b)=>b.v-a.v),
+      (MJ.jn?hbar(srcG.filter(s=>s.jn>0).map(s=>({k:s.k,v:pct(s.jn,MJ.jn),note:s.jn+' of '+MJ.jn})).sort((a,b)=>b.v-a.v),
         {fmt:v=>f1(v)+'%',color:P[1],drill:'src'}):EMPTY),
-      '','Measured against the '+f0(mh.jn)+' people who actually joined, so these shares add up to 100%. '
+      '','Measured against the '+f0(MJ.jn)+' people who actually joined, so these shares add up to 100%. '
         +'This says where your hires come from — it does not say which channel is most efficient, '
         +'because a channel that sends a huge volume of CVs will rank high here even with a poor conversion rate.'),
     tile('Requisition fill status by department','Sanctioned headcount vs on board vs still open',
@@ -1124,8 +1118,6 @@ function pgOv(d,m,rq){
 
 /* ---- page: funnel ---- */
 function pgFn(d,m){
-  d=DC; m=MC;      // always the CV cohort — see BASIS note
-  const CN=cohortNote();
   const ms=uniq([...d.map(r=>r.ym),...d.map(jmon)]);   // CV months + joining months
   const open=d.filter(r=>r.active&&r.cvd), T=new Date();
   const age=r=>Math.round((T-new Date(r.cvd))/864e5);
@@ -1154,7 +1146,6 @@ function pgFn(d,m){
     {k:'After selection (offer drop)',v:m.sl-m.jn},
     {k:'Joined then left',v:m.lf}];
   return [
-    CN,
     tile('Stage conversion rates','What share survives each step',
       hbar([{k:'CV → Interview',v:m.c2i},{k:'Interview → Selection',v:m.i2s},
             {k:'Selection → Joining',v:m.s2j},{k:'CV → Joining (overall)',v:m.cv2j}],
@@ -1227,8 +1218,6 @@ function pgFn(d,m){
 
 /* ---- page: recruiter & source ROI ---- */
 function pgRoi(d,m){
-  d=DC; m=MC;      // always the CV cohort — see BASIS note
-  const CN=cohortNote();
   const ms=uniq([...d.map(r=>r.ym),...d.map(jmon)]);   // CV months + joining months
   const rec=[...grp(d,r=>r.rec)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv);
   const src=[...grp(d,r=>r.src)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv);
@@ -1240,7 +1229,6 @@ function pgRoi(d,m){
     return {k:s.k,joined:cnt(g,r=>r.joined),sel:cnt(g,r=>r.selected&&!r.joined),
             act:cnt(g,r=>r.active&&!r.selected),lost:cnt(g,r=>r.lost)};});
   return [
-    CN,
     tile('Recruiter scorecard','Volume is easy — conversion and speed are the real measures','<div>'+
       tbl('t_rec',[{t:'Recruiter'},{t:'CVs',n:1},{t:'Reached sel.',n:1},{t:'Joined',n:1},{t:'Open',n:1},{t:'CV→Join',n:1},{t:'Sel→Join',n:1},{t:'CVs per hire',n:1},{t:'Median days CV→join',n:1}],
         rec.map(r=>[r.k,r.cv,r.sl,nv(r.jn,'g'),nv(r.ac,'o'),
@@ -1276,7 +1264,6 @@ function pgRoi(d,m){
 
 /* ---- page: positions ---- */
 function pgPos(d,m,rq){
-  d=DC; m=MC;      // always the CV cohort — see BASIS note
   const pg=[...grp(d,r=>r.pos)].map(([k,v])=>({k,code:v[0].code,dept:v[0].dept,...M(v)})).sort((a,b)=>b.cv-a.cv);
   const od=rq.filter(q=>q.overdue).sort((a,b)=>(b.age||0)-(a.age||0));
   const opn=rq.filter(q=>q.status==='OPEN'&&q.age!=null);
@@ -1319,7 +1306,6 @@ function pgPos(d,m,rq){
 
 /* ---- page: salary ---- */
 function pgSal(d,m){
-  d=DC; m=MC;      // always the CV cohort — see BASIS note
   const hs=d.filter(r=>r.hike!=null);
   const cs=d.map(r=>r.cs).filter(Boolean), es=d.map(r=>r.es).filter(Boolean);
   const bands=[[-1e4,0,'Cut / same'],[0,10,'0–10%'],[10,20,'10–20%'],[20,30,'20–30%'],[30,50,'30–50%'],[50,1e6,'Over 50%']];
@@ -1388,7 +1374,6 @@ function pgRec(d){
 
 /* ---- insights ---- */
 function insights(d,m,rq){
-  d=DC; m=MC;      // findings are conversion-based, so CV cohort
   const o=[];
   const src=[...grp(d,r=>r.src)].map(([k,v])=>({k,cv:v.length,jn:cnt(v,r=>r.joined)}))
     .filter(x=>x.cv>=15).map(x=>({...x,y:pct(x.jn,x.cv)})).sort((a,b)=>b.y-a.y);
