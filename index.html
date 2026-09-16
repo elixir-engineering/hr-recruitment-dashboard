@@ -339,8 +339,15 @@ function person(v){
   }
   return onePerson(s)||'(blank)';
 }
-const DEPTP={VF:'Fire / Vaccifire',POR:'Project',P0R:'Project',TFM:'TFM',ADM:'Admin',
+const DEPTP={VF:'Vaccifire',POR:'Project',P0R:'Project',TFM:'TFM',ADM:'Admin',
  IOT:'IOT',ACC:'Accounts',PUR:'Purchase'};
+/* One canonical name per department. The candidate tracker reaches this department through
+   the VF job-code prefix and used to label it "Fire / Vaccifire"; the requisition sheet
+   types it as "Fire". They are the same department, so both resolve to Vaccifire and the
+   two sheets finally line up on it. Add future spellings here, not at the call sites. */
+const DEPTALIAS={'fire':'Vaccifire','fire / vaccifire':'Vaccifire','fire/vaccifire':'Vaccifire',
+ 'vaccifire':'Vaccifire','vacci fire':'Vaccifire','fire & vaccifire':'Vaccifire'};
+const deptName=v=>{const t=nrm(v); return t?(DEPTALIAS[t.toLowerCase()]||t):t;};
 function splitPos(v){const s=nrm(v); if(!s)return ['(blank)','','(blank)'];
  const m=s.match(/([A-Za-z0]{2,4})\s*\/\s*(\d{2,3})\s*$/);
  if(!m)return [s,'','Other'];
@@ -371,7 +378,7 @@ function buildCands(rows){
   const out=[];
   rows.forEach(r=>{
     const name=nrm(r[1]); if(!name||/^candidate name$/i.test(name))return;
-    const [pos,code,dept]=splitPos(r[4]);
+    const [pos,code,dept0]=splitPos(r[4]); const dept=deptName(dept0);
     const cvd=pdate(r[3])||pdate(r[0]), ivd=pdate(r[11]), seld=pdate(r[14]), jd=pdate(r[15]);
     const status=nrm(r[10])||'(blank)';
     const cs=psal(r[12]), es=psal(r[13]);
@@ -404,7 +411,7 @@ function buildReqs(rows){
     const gi=v=>{const s=nrm(v);return /^\d+(\.\d+)?$/.test(s)?Math.round(+s):0;};
     const start=pdate(r[4]), end=pdate(r[5]);
     const status=(nrm(r[3])||'(blank)').toUpperCase();
-    out.push({pos,code,dept:nrm(r[6])||dc,loc:nrm(r[2])||'(blank)',status,
+    out.push({pos,code,dept:deptName(r[6])||deptName(dc),loc:nrm(r[2])||'(blank)',status,
       nos:gi(r[7]),onboard:gi(r[8]),bal:gi(r[9]),
       owner:nrm(r[10])||'(unassigned)',
       start:iso(start),end:iso(end),
@@ -1434,6 +1441,9 @@ function exportCSV(){
 }
 
 /* ---- boot ---- */
+/* the snapshot was captured before the departments were unified, so relabel it once */
+SNAPSHOT.cands.forEach(r=>r.dept=deptName(r.dept));
+SNAPSHOT.reqs.forEach(q=>q.dept=deptName(q.dept));
 document.getElementById('fq').oninput=e=>{FQ=e.target.value.toLowerCase().trim();render();};
 C=SNAPSHOT.cands; R=SNAPSHOT.reqs; rebuildFilters(); render();
 setStat('snap','Snapshot '+SNAPSHOT.generated);
