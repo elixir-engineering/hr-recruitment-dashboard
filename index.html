@@ -162,6 +162,57 @@ svg text{font-family:inherit}
 #drill .dk .v{font-size:16px;font-weight:700;color:var(--tx);letter-spacing:-.4px}
 #drill .db{flex:1;overflow:auto;padding:10px 18px 18px;min-height:0}
 #drill .df{padding:10px 18px;border-top:1px solid var(--line);display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap}
+/* ---------- AI copilot ---------- */
+#askBtn{background:linear-gradient(135deg,rgba(76,141,255,.22),rgba(167,139,250,.22));
+ border-color:rgba(76,141,255,.55);color:var(--a1);font-weight:700}
+#askBtn:hover{border-color:var(--a1);color:var(--tx)}
+#cop{position:fixed;top:0;right:0;bottom:0;width:min(480px,96vw);background:var(--pnl);z-index:83;
+ border-left:1px solid var(--line);box-shadow:-8px 0 40px rgba(0,0,0,.5);display:none;flex-direction:column}
+#cop.on{display:flex}
+#cop .ch{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px;flex-shrink:0}
+#cop .ch h2{font-size:14px;font-weight:670;letter-spacing:-.2px;display:flex;align-items:center;gap:7px}
+#cop .ch .s{font-size:11px;color:var(--tx3);margin-top:2px;line-height:1.4}
+#cop .ch .x{background:none;border:1px solid var(--line);color:var(--tx2);width:28px;height:28px;
+ border-radius:6px;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0}
+#cop .ch .x:hover{color:var(--a4);border-color:var(--a4)}
+#cop .cb{flex:1;overflow:auto;padding:12px 16px;min-height:0;display:flex;flex-direction:column;gap:11px}
+#cop .cf{padding:10px 16px;border-top:1px solid var(--line);flex-shrink:0}
+#cop .cin{display:flex;gap:7px}
+#cop .cin input{flex:1;min-width:0;background:var(--pnl2);border:1px solid var(--line);color:var(--tx);
+ border-radius:7px;padding:9px 11px;font:12.5px inherit}
+#cop .cin input:focus{outline:none;border-color:var(--a1)}
+#cop .cin button{background:var(--a1);border:none;color:#fff;border-radius:7px;padding:0 15px;
+ font:700 12px inherit;cursor:pointer}
+#cop .cin button:disabled{opacity:.45;cursor:default}
+.chip{background:var(--pnl2);border:1px solid var(--line);color:var(--tx2);border-radius:20px;
+ padding:5px 11px;font:500 11px inherit;cursor:pointer;text-align:left}
+.chip:hover{border-color:var(--a1);color:var(--a1)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.msg{border-radius:9px;padding:10px 12px;font-size:12.5px;line-height:1.5}
+.msg.q{background:rgba(76,141,255,.13);border:1px solid rgba(76,141,255,.3);color:var(--tx);align-self:flex-end;
+ max-width:86%;font-weight:600}
+.msg.a{background:var(--pnl2);border:1px solid var(--line);color:var(--tx2)}
+.msg.a p{margin:0 0 7px}.msg.a p:last-child{margin:0}
+.msg.a ul{margin:4px 0 7px;padding-left:17px}.msg.a li{margin:2px 0}
+.msg.a b{color:var(--tx)}
+.msg.err{background:rgba(255,92,108,.1);border-color:rgba(255,92,108,.4)}
+.msg .big{font-size:27px;font-weight:700;letter-spacing:-.8px;color:var(--a2);line-height:1.15;margin-bottom:2px}
+.msg .cap{font-size:11px;color:var(--tx3);margin-bottom:7px}
+.msg .kv{display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid var(--line);font-size:11.5px}
+.msg .kv:last-child{border-bottom:none}
+.msg .kv b{color:var(--tx);font-variant-numeric:tabular-nums}
+.msg .src{display:flex;align-items:center;gap:7px;margin-top:9px;font-size:10px;color:var(--tx3)}
+.msg .src .tag{border:1px solid var(--line);border-radius:20px;padding:1px 7px;font-weight:700}
+.msg .src .tag.fast{color:var(--a2);border-color:rgba(46,204,155,.5)}
+.msg .src .tag.ai{color:var(--a5);border-color:rgba(167,139,250,.5)}
+.msg .act{margin-top:9px;display:flex;gap:6px;flex-wrap:wrap}
+.msg .act button{background:var(--pnl);border:1px solid var(--line);color:var(--tx2);border-radius:6px;
+ padding:4px 9px;font:600 11px inherit;cursor:pointer}
+.msg .act button:hover{color:var(--a1);border-color:var(--a1)}
+.dots span{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--tx3);margin-right:3px;
+ animation:bl 1.1s infinite}
+.dots span:nth-child(2){animation-delay:.18s}.dots span:nth-child(3){animation-delay:.36s}
+@keyframes bl{50%{opacity:.2}}
 #toast{position:fixed;bottom:16px;right:16px;background:var(--pnl);border:1px solid var(--line);
  border-left:3px solid var(--a1);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--tx2);
  box-shadow:0 8px 28px rgba(0,0,0,.4);z-index:99;max-width:380px;display:none}
@@ -175,6 +226,7 @@ svg text{font-family:inherit}
   <button class="ib" onclick="loadLive(1)">↻ Refresh</button>
   <button class="ib" onclick="document.body.classList.toggle('dense');this.textContent=document.body.classList.contains('dense')?'Density: compact':'Density: normal'">Density: normal</button>
   <button class="ib" onclick="exportCSV()">Export CSV</button>
+  <button class="ib" id="askBtn" onclick="copOpen()">✨ Ask</button>
 </div>
 
 <div class="fbar" id="fbar">
@@ -210,6 +262,24 @@ svg text{font-family:inherit}
     <button class="ib" id="dFilt" onclick="drillToFilter()"></button>
     <button class="ib" onclick="drillExport()">Export these rows</button>
     <span class="spacer"></span><button class="ib" onclick="closeDrill()">Close</button>
+  </div>
+</aside>
+<aside id="cop">
+  <div class="ch">
+    <div style="flex:1">
+      <h2>✨ Ask the dashboard</h2>
+      <div class="s">Counting questions are answered instantly from the data already loaded.
+        Anything needing judgement goes to the AI.</div>
+    </div>
+    <button class="x" onclick="copClose()">×</button>
+  </div>
+  <div class="cb" id="copBody"></div>
+  <div class="cf">
+    <div class="cin">
+      <input id="copIn" placeholder="e.g. how many joined in August?" autocomplete="off"
+             onkeydown="if(event.key==='Enter')copSend()">
+      <button id="copGo" onclick="copSend()">Ask</button>
+    </div>
   </div>
 </aside>
 <div id="toast"></div>
@@ -764,7 +834,7 @@ function openDrill(id,key){
 }
 function closeDrill(){document.getElementById('scrim').classList.remove('on');
   document.getElementById('drill').classList.remove('on');DCUR=null;}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrill();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrill();copClose();}});
 function drillToFilter(){
   if(!DCUR||!DCUR.D.dim)return;
   const dim=DCUR.D.dim; F[dim].add(DCUR.key);
@@ -1438,6 +1508,422 @@ function exportCSV(){
   a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
   a.download='hr_recruitment_filtered.csv'; a.click();
   toast('Exported '+f0(d.length)+' filtered rows to CSV.');
+}
+
+
+/* =======================================================================
+   AI COPILOT
+   Two tiers, deliberately:
+     1) askLocal()  — pattern-matched counting questions, answered from the
+        arrays already in memory. No network, no model, sub-millisecond.
+     2) /api/ask    — only for questions that need judgement. It receives an
+        AGGREGATE brief; candidate names and individual salaries never leave
+        the browser.
+   ======================================================================= */
+
+const COP_SUGGEST=[
+  'How many joined in August?',
+  'Which recruiter converts best?',
+  'How many open positions are there?',
+  'Which source gives the most hires?',
+  "What's our offer drop-off?",
+  'How long does it take to hire someone?',
+  'Why is our offer drop-off so high?',
+  'Where is the biggest bottleneck and what should we fix first?'
+];
+/* questions that want reasoning, not a number — these skip the local tier */
+const COP_DEEP=/\b(why|how can|how do we|how should|should we|recommend|suggest|advice|advise|explain|analys|analyz|insight|improve|reduce|increase|fix|problem|issue|root cause|compare|versus|vs\b|trend|forecast|predict|strateg|what do you think|worry|concern|risk|better|worse than|worth it|worth the|justify|value for money|best approach|make sense)\b/i;
+
+let COP_ROWS={}, COP_N=0, COP_BUSY=false;
+const copKeep=rows=>{const k='k'+(++COP_N);COP_ROWS[k]=rows;return k;};
+
+/* ---------- entity extraction from the question ---------- */
+const MONNUM={jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,
+  jul:7,july:7,aug:8,august:8,sep:9,sept:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12};
+
+/* all months present in the data, on either date basis */
+function copMonths(){return uniq([...C.map(r=>r.ym),...C.map(jmon)]);}
+
+function copPeriod(q){
+  const t=q.toLowerCase();
+  let m=t.match(/\b(20\d{2})[-\/](0[1-9]|1[0-2])\b/);          // 2026-08
+  if(m)return m[1]+'-'+m[2];
+  m=t.match(/\b([a-z]{3,9})\.?\s*(20\d{2})?\b/g)||[];
+  const months=copMonths();
+  for(const tok of m){
+    const mm=tok.trim().replace('.','').split(/\s+/);
+    const num=MONNUM[mm[0]];
+    if(!num)continue;
+    const mo=String(num).padStart(2,'0');
+    if(mm[1])return mm[1]+'-'+mo;
+    const hit=months.filter(x=>x.slice(5)===mo).sort();          // no year given -> latest match
+    if(hit.length)return hit[hit.length-1];
+  }
+  const now=new Date();
+  if(/\bthis month\b/.test(t))return now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  if(/\blast month\b/.test(t)){const d=new Date(now.getFullYear(),now.getMonth()-1,1);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+  return null;
+}
+/* match a question word against values actually present in the data */
+function copMatchVal(q,vals){
+  const t=q.toLowerCase();
+  let best=null;
+  vals.forEach(v=>{const a=String(v||'').toLowerCase();
+    if(a&&a!=='(blank)'&&a.length>2&&t.includes(a)&&(!best||a.length>best.length))best=v;});
+  return best;
+}
+const copDept=q=>copMatchVal(q,uniq([...C.map(r=>r.dept),...R.map(x=>x.dept)]));
+const copRec =q=>copMatchVal(q,uniq(C.map(r=>r.rec)));
+const copSrc =q=>copMatchVal(q,uniq(C.map(r=>r.src)));
+const copLoc =q=>copMatchVal(q,uniq(C.map(r=>r.loc)));
+
+/* the row set a question is about, before the metric is applied */
+function copScope(q){
+  const p=copPeriod(q), dp=copDept(q), rc=copRec(q), sc=copSrc(q), lc=copLoc(q);
+  const where=[];
+  if(dp)where.push('department '+dp);
+  if(rc)where.push('recruiter '+rc);
+  if(sc)where.push('source '+sc);
+  if(lc)where.push('location '+lc);
+  const base=r=>(!dp||r.dept===dp)&&(!rc||r.rec===rc)&&(!sc||r.src===sc)&&(!lc||r.loc===lc);
+  return {p,dp,rc,sc,lc,where,
+    cv:C.filter(r=>base(r)&&(!p||r.ym===p)),           // CV-cohort rows
+    jn:C.filter(r=>base(r)&&r.joined&&(!p||jmon(r)===p)) // people who joined
+  };
+}
+const copWhen=sc=>sc.p?' in '+monLab(sc.p):'';
+const copWhere=sc=>sc.where.length?' ('+sc.where.join(', ')+')':'';
+
+/* ---------- answer building blocks ---------- */
+const copBig=(v,cap)=>'<div class="big">'+v+'</div><div class="cap">'+cap+'</div>';
+const copKv=rows=>rows.map(([k,v])=>'<div class="kv"><span>'+esc(k)+'</span><b>'+v+'</b></div>').join('');
+function copShowBtn(rows,title,kind){
+  if(!rows||!rows.length)return '';
+  const k=copKeep(rows);
+  return '<div class="act"><button onclick="copShow(\''+k+'\',\''+esc(title).replace(/'/g,"&#39;")+'\',\''+(kind||'cand')+'\')">'
+    +'Show these '+f0(rows.length)+' in the dashboard</button></div>';
+}
+function copShow(k,title,kind){
+  const rows=COP_ROWS[k]||[];
+  copClose();
+  reg('cop_'+k,title,()=>rows,kind||'cand');
+  openDrill('cop_'+k,title);
+}
+
+
+/* ---------- tier 1: the local answer engine ---------- */
+const COP_SKILLS=[
+
+{k:'help', re:/^(help|what can (you|i) (do|ask)|options|examples?)\b/i, run:()=>({
+  html:'<p>Ask me about counts, rankings or rates. Some that work well:</p><ul>'
+    +COP_SUGGEST.slice(0,6).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'
+    +'<p>Ask <b>why</b> or <b>what should we fix</b> and the question goes to the AI instead.</p>'})},
+
+{k:'joined', re:/\b(join|joined|joining|hire[ds]?|hiring|onboard)\b/i, run:q=>{
+  const sc=copScope(q), rows=sc.jn, m=M(rows);
+  return {html:copBig(f0(rows.length),'people joined'+copWhen(sc)+copWhere(sc))
+    +copKv([['Still with us',f0(m.rt)],['Joined then left',f0(m.lf)+(m.jn?' ('+f1(m.attr)+'%)':'')],
+            ['Median days CV to joining',m.tat==null?'–':f1(m.tat)+' d']])
+    +'<p style="font-size:11px;color:var(--tx3);margin-top:7px">Counted by the month each person actually started.</p>'
+    +copShowBtn(rows,'Joined'+copWhen(sc))};}},
+
+{k:'cvs', re:/\b(cvs?|resumes?|applications?|applicants?|candidates? (received|screened)|sourced)\b/i, run:q=>{
+  const sc=copScope(q), rows=sc.cv, m=M(rows);
+  return {html:copBig(f0(rows.length),'CVs received'+copWhen(sc)+copWhere(sc))
+    +copKv([['Interviewed',f0(m.iv)+' ('+f1(m.c2i)+'%)'],['Reached selection',f0(m.sl)+' ('+f1(m.i2s)+'% of interviewed)'],
+            ['Joined from this cohort',f0(m.jn)+' ('+f1(m.cv2j)+'%)'],['Still in pipeline',f0(m.ac)]])
+    +copShowBtn(rows,'CVs'+copWhen(sc))};}},
+
+{k:'pipeline', re:/\b(pipeline|in process|awaiting|waiting|pending|pend|active candidates|pipeline backlog)\b/i, run:q=>{
+  const sc=copScope(q), rows=sc.cv.filter(r=>r.active), T=new Date();
+  const age=r=>r.cvd?Math.round((T-new Date(r.cvd))/864e5):null;
+  const ages=rows.map(age).filter(x=>x!=null);
+  return {html:copBig(f0(rows.length),'candidates still in play'+copWhere(sc))
+    +copKv([['Waiting 0–30 days',f0(ages.filter(x=>x<=30).length)],
+            ['Waiting 31–60 days',f0(ages.filter(x=>x>30&&x<=60).length)],
+            ['Waiting over 60 days',f0(ages.filter(x=>x>60).length)],
+            ['Median wait',ages.length?f0(med(ages))+' d':'–']])
+    +'<p style="font-size:11px;color:var(--tx3);margin-top:7px">Anything past 30 days is usually cold.</p>'
+    +copShowBtn(rows,'Still in pipeline')};}},
+
+{k:'open', re:/\b(open\s+(position|seat|role|requisition|vacanc|job)\w*|vacanc\w*|requisition\w*|sanctioned?|how many\s+(position|seat|role|job)\w*|still to fill|seats?\s+(left|open|remaining)|headcount)/i, run:q=>{
+  const sc=copScope(q);
+  const rq=R.filter(x=>!sc.dp||x.dept===sc.dp);
+  const open=rq.filter(x=>x.status==='OPEN');
+  return {html:copBig(f0(sum(rq,x=>x.bal)),'seats still open'+(sc.dp?' in '+sc.dp:''))
+    +copKv([['Sanctioned headcount',f0(sum(rq,x=>x.nos))],['Already on board',f0(sum(rq,x=>x.onboard))],
+            ['Open requisitions',f0(open.length)+' of '+f0(rq.length)],
+            ['Overdue',f0(cnt(rq,x=>x.overdue))]])
+    +copShowBtn(open,'Open requisitions'+(sc.dp?' — '+sc.dp:''),'req')};}},
+
+{k:'recruiter', re:/\b(recruiter|recruiters)\b/i, run:q=>{
+  const sc=copScope(q);
+  const worst=/\b(worst|weak|poor|bottom|lowest|struggl)\b/i.test(q);
+  const g=[...grp(sc.cv,r=>r.rec)].map(([k,v])=>({k,...M(v)})).filter(x=>x.k!=='(blank)'&&x.cv>=10);
+  if(!g.length)return null;
+  const by=/\b(most|volume|busiest|handled)\b/i.test(q)?'cv':'cv2j';
+  const sorted=[...g].sort((a,b)=>by==='cv'?b.cv-a.cv:b.cv2j-a.cv2j);
+  const pick=worst?sorted[sorted.length-1]:sorted[0];
+  return {html:copBig(esc(pick.k),(worst?'lowest':'best')+(by==='cv'?' by volume':' conversion')+copWhen(sc))
+    +copKv([['CVs handled',f0(pick.cv)],['Reached selection',f0(pick.sl)],['Joined',f0(pick.jn)],
+            ['CV to join rate',f1(pick.cv2j)+'%'],['CVs needed per hire',pick.perHire==null?'–':f1(pick.perHire)]])
+    +'<p style="font-size:11px;color:var(--tx3);margin-top:8px">Full ranking (min 10 CVs):</p>'
+    +copKv(sorted.map(x=>[x.k,f1(x.cv2j)+'% · '+f0(x.jn)+'/'+f0(x.cv)]))};}},
+
+{k:'source', re:/\b(source|sources|channel|channels|naukri|referral|portal|where (do|are) (our |the )?(cvs?|candidates?|hires?)|job board)\b/i, run:q=>{
+  const sc=copScope(q);
+  const worst=/\b(worst|weak|poor|bottom|lowest|waste|nothing)\b/i.test(q);
+  const g=[...grp(sc.cv,r=>r.src)].map(([k,v])=>({k,cv:v.length,jn:cnt(v,r=>r.joined)}))
+    .filter(x=>x.k!=='(blank)'&&x.cv>=5).map(x=>({...x,y:pct(x.jn,x.cv)}));
+  if(!g.length)return null;
+  const byVol=/\b(most hires|most joins|biggest|volume)\b/i.test(q);
+  const sorted=[...g].sort((a,b)=>byVol?b.jn-a.jn:b.y-a.y);
+  const pick=worst?sorted[sorted.length-1]:sorted[0];
+  const dead=g.filter(x=>!x.jn);
+  return {html:copBig(esc(pick.k),(worst?'weakest':'best')+' channel'+(byVol?' by hires':' by conversion')+copWhen(sc))
+    +copKv([['CVs sent',f0(pick.cv)],['Hires',f0(pick.jn)],['Conversion',f1(pick.y)+'%']])
+    +'<p style="font-size:11px;color:var(--tx3);margin-top:8px">All channels with 5+ CVs:</p>'
+    +copKv(sorted.map(x=>[x.k,f1(x.y)+'% · '+f0(x.jn)+'/'+f0(x.cv)]))
+    +(dead.length?'<p style="font-size:11px;color:var(--a4);margin-top:7px">Zero hires from: '
+      +dead.map(x=>esc(x.k)+' ('+x.cv+' CVs)').join(', ')+'</p>':'')};}},
+
+{k:'dropoff', re:/\b(drop.?off|dropoff|decline[ds]?|backed out|back out|walked away|did ?n.t join|didnt join|offer (decline|reject|loss)|ghost)\b/i, run:q=>{
+  const sc=copScope(q), m=M(sc.cv);
+  const lost=sc.cv.filter(r=>r.selected&&!r.joined);
+  return {html:copBig(f1(m.drop)+'%','of selected candidates never joined'+copWhen(sc)+copWhere(sc))
+    +copKv([['Reached selection',f0(m.sl)],['Actually joined',f0(m.jn)],['Walked away',f0(m.sl-m.jn)],
+            ['Median days selection to joining',m.t3==null?'–':f1(m.t3)+' d']])
+    +'<p style="font-size:11px;color:var(--tx3);margin-top:7px">The notice-period gap is when counter-offers land.</p>'
+    +copShowBtn(lost,'Selected but never joined')};}},
+
+{k:'speed', re:/\b(how long|time to (fill|hire)|days to|turnaround|tat|speed|how fast|duration)\b/i, run:q=>{
+  const sc=copScope(q), m=M(sc.cv), fpm=fillMedian(R);
+  return {html:copBig(m.tat==null?'–':f1(m.tat)+' days','median CV to joining'+copWhen(sc)+copWhere(sc))
+    +copKv([['CV to interview',m.t1==null?'–':f1(m.t1)+' d'],['Interview to selection',m.t2==null?'–':f1(m.t2)+' d'],
+            ['Selection to joining',m.t3==null?'–':f1(m.t3)+' d'],
+            ['Requisition days per person placed',fpm==null?'–':f1(fpm)+' d']])};}},
+
+{k:'attrition', re:/\b(attrition|left|leaving|quit|resign|churn|retention|still with us|stayed)\b/i, run:q=>{
+  const sc=copScope(q), rows=sc.jn, m=M(rows), gone=rows.filter(r=>r.left);
+  return {html:copBig(f1(m.attr)+'%','of hires have already left'+copWhen(sc)+copWhere(sc))
+    +copKv([['Total joined',f0(m.jn)],['Still with us',f0(m.rt)],['Joined then left',f0(m.lf)]])
+    +copShowBtn(gone,'Joined and left')};}},
+
+{k:'department', re:/\b(department|dept|division|by team|which team)\b/i, run:q=>{
+  const sc=copScope(q);
+  const g=[...grp(sc.cv,r=>r.dept)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv);
+  const rq=[...grp(R,x=>x.dept||'(blank)')].map(([k,v])=>({k,bal:sum(v,x=>x.bal),nos:sum(v,x=>x.nos)}));
+  return {html:copBig(f0(g.length),'departments hiring'+copWhen(sc))
+    +'<p style="font-size:11px;color:var(--tx3);margin:6px 0 3px">CVs · joined · open seats</p>'
+    +copKv(g.map(x=>{const r=rq.find(y=>y.k===x.k);
+      return [x.k,f0(x.cv)+' · '+f0(x.jn)+' · '+(r?f0(r.bal):'0')];}))};}},
+
+{k:'status', re:/\b(status|rejected|reject|shortlist|hold|in progress|not interested|stage)\b/i, run:q=>{
+  const sc=copScope(q);
+  const g=[...grp(sc.cv,r=>r.status)].map(([k,v])=>({k,n:v.length})).sort((a,b)=>b.n-a.n);
+  const rej=sc.cv.filter(r=>r.lost);
+  return {html:copBig(f0(sc.cv.length),'candidates by status'+copWhen(sc)+copWhere(sc))
+    +copKv(g.map(x=>[x.k,f0(x.n)+' ('+f1(pct(x.n,sc.cv.length))+'%)']))
+    +copShowBtn(rej,'Rejected or not interested')};}},
+
+{k:'salary', re:/\b(salary|salaries|ctc|pay|package|hike|compensation|cost|expect(ed|ation)|budget|wage)\b/i, run:q=>{
+  const sc=copScope(q);
+  const hs=sc.cv.filter(r=>r.hike!=null), cur=sc.cv.map(r=>r.cs).filter(Boolean), exp=sc.cv.map(r=>r.es).filter(Boolean);
+  const jnHike=sc.cv.filter(r=>r.joined&&r.hike!=null).map(r=>r.hike);
+  const lostHike=sc.cv.filter(r=>r.lost&&r.hike!=null).map(r=>r.hike);
+  if(!cur.length&&!exp.length)return null;
+  return {html:copBig(exp.length?inr(med(exp)):'–','median expected salary'+copWhen(sc)+copWhere(sc))
+    +copKv([['Median current salary',cur.length?inr(med(cur)):'–'],
+            ['Median hike asked',hs.length?f1(med(hs.map(r=>r.hike)))+'%':'–'],
+            ['Median hike — those who joined',jnHike.length?f1(med(jnHike))+'%':'–'],
+            ['Median hike — those we lost',lostHike.length?f1(med(lostHike))+'%':'–'],
+            ['Records with salary data',f0(cur.length)+' of '+f0(sc.cv.length)]])};}},
+
+{k:'position', re:/\b(positions?|roles?|designations?|job titles?|which (jobs?|posts?))\b/i, run:q=>{
+  const sc=copScope(q);
+  const g=[...grp(sc.cv,r=>r.pos)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv).slice(0,12);
+  if(!g.length)return null;
+  return {html:copBig(f0(uniq(sc.cv.map(r=>r.pos)).length),'distinct positions'+copWhen(sc))
+    +'<p style="font-size:11px;color:var(--tx3);margin:6px 0 3px">Top by CV volume — CVs · joined</p>'
+    +copKv(g.map(x=>[x.k,f0(x.cv)+' · '+f0(x.jn)]))};}}
+];
+
+/* Tried in this order, most specific first. A question like "which source gives the most
+   hires" contains "hires", so the generic joined skill would otherwise swallow it. */
+const COP_ORDER=['help','recruiter','source','dropoff','speed','attrition','salary','open',
+                 'department','status','position','pipeline','joined','cvs'];
+const COP_SORTED=COP_ORDER.map(k=>COP_SKILLS.find(x=>x.k===k)).filter(Boolean)
+  .concat(COP_SKILLS.filter(x=>!COP_ORDER.includes(x.k)));
+
+function askLocal(q){
+  for(const sk of COP_SORTED){
+    if(!sk.re.test(q))continue;
+    try{const a=sk.run(q); if(a&&a.html)return a;}catch(e){/* fall through to the next skill */}
+  }
+  return null;
+}
+
+
+/* ---------- tier 2: aggregates for the AI ----------
+   Everything here is a count, a rate or a median. No candidate names, no
+   individual salaries, no remarks. Roughly 3–6 KB, which is what keeps the
+   round trip short. */
+function dataBrief(){
+  const d=apply(), m=M(d), rq=applyR(), mj=M(applyJ());
+  const top=(a,n)=>a.slice(0,n);
+  const months=uniq([...d.map(r=>r.ym),...d.map(jmon)]);
+  const r2=x=>x==null?null:Math.round(x*10)/10;
+  return {
+    asOf:new Date().toISOString().slice(0,10),
+    dataSource:SRC_MODE,
+    activeFilters:Object.fromEntries(FDEFS.map(f=>[f.id,[...F[f.id]]]).filter(([,v])=>v.length)),
+    searchText:FQ||null,
+    joinCountingBasis:BASIS==='jd'?'month the person joined':'month the CV arrived',
+    candidateTotals:{cvs:m.cv,interviewed:m.iv,reachedSelection:m.sl,joined:mj.jn,
+      stillWithUs:mj.rt,joinedThenLeft:mj.lf,stillInPipeline:m.ac,rejectedOrLost:m.ls},
+    ratesPct:{cvToInterview:r2(m.c2i),interviewToSelection:r2(m.i2s),selectionToJoin:r2(m.s2j),
+      cvToJoin:r2(m.cv2j),offerDropOff:r2(m.drop),attritionOfHires:r2(mj.attr),
+      cvsNeededPerHire:r2(m.perHire)},
+    medianDays:{cvToInterview:r2(m.t1),interviewToSelection:r2(m.t2),selectionToJoin:r2(m.t3),
+      cvToJoining:r2(m.tat),requisitionDaysPerPersonPlaced:r2(fillMedian(rq))},
+    byMonth:months.map(x=>{const g=d.filter(r=>r.ym===x),gm=M(g);
+      return {month:x,cvsReceived:gm.cv,interviewed:gm.iv,reachedSelection:gm.sl,
+        joinedFromThisCvCohort:gm.jn,peopleWhoStartedThisMonth:cnt(d,r=>jmon(r)===x),
+        cvToJoinPct:r2(gm.cv2j),offerDropOffPct:r2(gm.drop)};}),
+    byRecruiter:top([...grp(d,r=>r.rec)].map(([k,v])=>{const g=M(v);
+      return {recruiter:k,cvs:g.cv,reachedSelection:g.sl,joined:g.jn,cvToJoinPct:r2(g.cv2j),
+        cvsPerHire:r2(g.perHire),medianDaysCvToJoin:r2(g.tat)};}).sort((a,b)=>b.cvs-a.cvs),12),
+    bySource:top([...grp(d,r=>r.src)].map(([k,v])=>{const g=M(v);
+      return {source:k,cvs:g.cv,joined:g.jn,conversionPct:r2(g.cv2j),offerDropOffPct:r2(g.drop)};})
+      .sort((a,b)=>b.cvs-a.cvs),14),
+    byDepartment:[...grp(d,r=>r.dept)].map(([k,v])=>{const g=M(v);
+      const q=R.filter(x=>x.dept===k);
+      return {department:k,cvs:g.cv,joined:g.jn,cvToJoinPct:r2(g.cv2j),inPipeline:g.ac,
+        sanctionedSeats:sum(q,x=>x.nos),onBoard:sum(q,x=>x.onboard),seatsStillOpen:sum(q,x=>x.bal)};}),
+    byStatus:[...grp(d,r=>r.status)].map(([k,v])=>({status:k,count:v.length})).sort((a,b)=>b.count-a.count),
+    byPosition:top([...grp(d,r=>r.pos)].map(([k,v])=>{const g=M(v);
+      return {position:k,cvs:g.cv,joined:g.jn,cvToJoinPct:r2(g.cv2j),medianDaysCvToJoin:r2(g.tat)};})
+      .sort((a,b)=>b.cvs-a.cvs),12),
+    requisitions:{total:rq.length,open:cnt(rq,q=>q.status==='OPEN'),closed:cnt(rq,q=>q.status==='CLOSED'),
+      overdue:cnt(rq,q=>q.overdue),sanctionedSeats:sum(rq,q=>q.nos),onBoard:sum(rq,q=>q.onboard),
+      seatsStillOpen:sum(rq,q=>q.bal)},
+    pipelineAgeing:(()=>{const T=new Date(),a=d.filter(r=>r.active&&r.cvd)
+      .map(r=>Math.round((T-new Date(r.cvd))/864e5));
+      return {waiting0to30:a.filter(x=>x<=30).length,waiting31to60:a.filter(x=>x>30&&x<=60).length,
+        waitingOver60:a.filter(x=>x>60).length,medianWaitDays:a.length?med(a):null};})(),
+    salary:(()=>{const cur=d.map(r=>r.cs).filter(Boolean),exp=d.map(r=>r.es).filter(Boolean),
+      hj=d.filter(r=>r.joined&&r.hike!=null).map(r=>r.hike),
+      hl=d.filter(r=>r.lost&&r.hike!=null).map(r=>r.hike);
+      return {currency:'INR',medianCurrentSalary:cur.length?med(cur):null,
+        medianExpectedSalary:exp.length?med(exp):null,
+        medianHikePctAmongHires:hj.length?r2(med(hj)):null,
+        medianHikePctAmongLost:hl.length?r2(med(hl)):null,
+        recordsWithSalaryData:cur.length};})(),
+    dataQualityWarnings:(()=>{const w=[];
+      const noJd=C.filter(r=>r.joined&&!r.jd&&!r.seld).length;
+      if(noJd)w.push(noJd+' people marked as joined have neither a joining nor a selection date, so they sit in no month');
+      const back=C.filter(r=>r.jd&&r.cvd&&r.jd<r.cvd).length;
+      if(back)w.push(back+' records have a joining date before the CV date, which is impossible and suggests a typo');
+      const noCv=C.filter(r=>!r.cvd).length;
+      if(noCv)w.push(noCv+' candidates have no CV date and fall outside every monthly figure');
+      return w;})()
+  };
+}
+
+/* ---------- panel ---------- */
+function copOpen(){
+  document.getElementById('cop').classList.add('on');
+  if(!document.getElementById('copBody').children.length)copGreet();
+  setTimeout(()=>document.getElementById('copIn').focus(),60);
+}
+function copClose(){document.getElementById('cop').classList.remove('on');}
+function copGreet(){
+  const act=Object.entries(Object.fromEntries(FDEFS.map(f=>[f.id,[...F[f.id]]]).filter(([,v])=>v.length)));
+  copAdd('a','<p>I can see the <b>'+f0(apply().length)+'</b> candidates and <b>'+f0(applyR().length)
+    +'</b> requisitions currently in view'
+    +(act.length?', filtered by '+act.map(([k,v])=>esc(k)+': '+esc(v.join(', '))).join(' · '):'')
+    +'. Ask me anything about them.</p>'
+    +'<div class="chips" style="margin-top:9px">'
+    +COP_SUGGEST.map(x=>'<button class="chip" onclick="copAsk(this.textContent)">'+esc(x)+'</button>').join('')
+    +'</div>');
+}
+function copAdd(cls,html){
+  const b=document.getElementById('copBody');
+  const d=document.createElement('div');
+  d.className='msg '+cls; d.innerHTML=html;
+  b.appendChild(d); b.scrollTop=b.scrollHeight;
+  return d;
+}
+const copSrcTag=(kind,ms)=>'<div class="src"><span class="tag '+(kind==='fast'?'fast':'ai')+'">'
+  +(kind==='fast'?'FROM DASHBOARD':'AI ANALYSIS')+'</span><span>'
+  +(ms<1000?Math.round(ms)+' ms':(ms/1000).toFixed(1)+' s')+'</span></div>';
+
+/* minimal markdown — bold, italics, bullets. Everything is escaped first. */
+function copMd(t){
+  const inline=x=>esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|\s)\*(\S.*?\S)\*/g,'$1<i>$2</i>');
+  let out='',ul=false;
+  String(t||'').split(/\r?\n/).forEach(l=>{
+    const li=l.match(/^\s*[-*•]\s+(.*)$/);
+    if(li){if(!ul){out+='<ul>';ul=true;}out+='<li>'+inline(li[1])+'</li>';return;}
+    if(ul){out+='</ul>';ul=false;}
+    if(l.trim())out+='<p>'+inline(l)+'</p>';
+  });
+  if(ul)out+='</ul>';
+  return out||'<p>'+inline(t)+'</p>';
+}
+function copAsk(q){document.getElementById('copIn').value=q;copSend();}
+function copSend(){
+  const inp=document.getElementById('copIn');
+  const q=inp.value.trim();
+  if(!q||COP_BUSY)return;
+  inp.value='';
+  copAdd('q',esc(q));
+  copRun(q);
+}
+
+async function copRun(q){
+  const t0=performance.now();
+  const local=askLocal(q);
+
+  /* a counting question with a local answer never touches the network */
+  if(local&&!COP_DEEP.test(q)){
+    copAdd('a',local.html+copSrcTag('fast',performance.now()-t0));
+    return;
+  }
+
+  COP_BUSY=true;
+  document.getElementById('copGo').disabled=true;
+  const box=copAdd('a','<span class="dots"><span></span><span></span><span></span></span> '
+    +'<span style="font-size:11px;color:var(--tx3)">Analysing the figures…</span>');
+  try{
+    const res=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question:q,brief:dataBrief()})});
+    const j=await res.json().catch(()=>({}));
+    const ms=performance.now()-t0;
+    if(j.answer&&!j.error){
+      box.innerHTML=copMd(j.answer)+copSrcTag('ai',ms);
+    }else{
+      /* AI unavailable — fall back to whatever the dashboard could work out */
+      box.className='msg a'+(local?'':' err');
+      box.innerHTML=(local?local.html+'<p style="font-size:11px;color:var(--a3);margin-top:8px">'
+          +'Answered from the dashboard — the AI side is unavailable: '+esc(j.answer||j.error||res.status)+'</p>'
+        :'<p>'+esc(j.answer||'The AI service could not be reached.')+'</p>')
+        +copSrcTag(local?'fast':'ai',ms);
+    }
+  }catch(e){
+    const ms=performance.now()-t0;
+    box.className='msg a'+(local?'':' err');
+    box.innerHTML=(local?local.html+'<p style="font-size:11px;color:var(--a3);margin-top:8px">'
+        +'Answered from the dashboard — no AI backend reachable here (this needs the deployed site, not a local file).</p>'
+      :'<p>No AI backend is reachable. On the deployed site this needs a <b>GROQ_API_KEY</b> environment variable in Vercel. '
+        +'Opening index.html directly from disk has no <code>/api</code> route at all.</p>')
+      +copSrcTag(local?'fast':'ai',ms);
+  }finally{
+    COP_BUSY=false;
+    document.getElementById('copGo').disabled=false;
+    document.getElementById('copBody').scrollTop=document.getElementById('copBody').scrollHeight;
+  }
 }
 
 /* ---- boot ---- */
