@@ -23,8 +23,27 @@ Tier 1 works with no setup at all. Tier 2 needs a key.
    - Apply to Production, Preview and Development.
 3. Redeploy (Deployments → ⋯ → Redeploy).
 
-Optional: set `GROQ_MODEL` to override the default `llama-3.3-70b-versatile`. Use
-`llama-3.1-8b-instant` if you want faster, shallower answers.
+### Which model it uses
+
+Groq moves models between free, preview and enterprise tiers, so the endpoint does not
+hardcode one. It asks the API which models *your key* can actually reach and picks the best
+it recognises, preferring in order:
+
+1. `openai/gpt-oss-120b` — free tier, ~500 tok/s, best reasoning of the open set
+2. `openai/gpt-oss-20b` — ~1000 tok/s, faster, a little shallower
+3. `qwen/qwen3.8-27b`
+
+If one returns 404 (no access on your plan) it falls through to the next automatically.
+
+Set `GROQ_MODEL` to pin a specific model and skip the discovery.
+
+> `llama-3.3-70b-versatile` and `llama-3.1-8b-instant` are **enterprise-only** on Groq now.
+> A free key gets a 404 for them. That is why the endpoint discovers rather than assumes.
+
+### Checking the setup
+
+Open `https://your-site.vercel.app/api/ask` in a browser. It returns JSON showing whether the
+key is set, which model will be used, and every model the key can see. No key value is exposed.
 
 ### What gets sent to Groq
 
