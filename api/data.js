@@ -17,6 +17,7 @@
 --------------------------------------------------------------------------- */
 
 const XLSX = require('xlsx');
+const crypto = require('crypto');
 
 /* Override with HR_XLSX_URL if the file ever moves. */
 const SHARE_URL = process.env.HR_XLSX_URL ||
@@ -24,7 +25,7 @@ const SHARE_URL = process.env.HR_XLSX_URL ||
 
 const TAB_TRACKER = process.env.HR_TAB_TRACKER || 'Recruitment Tracker';
 const TAB_REQS = process.env.HR_TAB_REQS || 'Sheet3';
-const CACHE_MS = Math.max(0, parseInt(process.env.CACHE_SECONDS || '60', 10) || 60) * 1000;
+const CACHE_MS = Math.max(0, parseInt(process.env.CACHE_SECONDS || '5', 10)) * 1000;
 const TIMEOUT_MS = 25000;
 
 let CACHE = { payload: null, at: 0 };
@@ -165,12 +166,19 @@ async function load() {
     const rq = rowsOf(wb, TAB_REQS);
     if (tr.error) { const e = new Error(tr.error); e.attempts = log; throw e; }
 
+    const tracker = tr.rows, reqs = rq.error ? [] : rq.rows;
+    /* hash the actual cell contents: the client sends back the hash it already
+       holds, and a poll that finds nothing new returns ~60 bytes instead of
+       the whole sheet. That is what makes a 5-second refresh affordable. */
+    const hash = crypto.createHash('sha1')
+      .update(JSON.stringify([tracker, reqs])).digest('hex').slice(0, 16);
+
     return {
-      tracker: tr.rows,
-      reqs: rq.error ? [] : rq.rows,
+      tracker, reqs,
       reqsError: rq.error || null,
       tabsFound: wb.SheetNames,
       bytes: buf.length,
+      hash,
       via,
       attempts: log,
       fetchedAt: new Date().toISOString()
@@ -182,16 +190,22 @@ module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const debug = req.query && req.query.debug;
 
+  /* the client passes the hash it already has; if nothing moved, say so cheaply */
+  const have = req.query && req.query.v;
+  const unchanged = p => ({ unchanged: true, hash: p.hash, fetchedAt: p.fetchedAt });
+
   if (CACHE.payload && Date.now() - CACHE.at < CACHE_MS && !debug) {
+    if (have && have === CACHE.payload.hash) return res.status(200).json(unchanged(CACHE.payload));
     return res.status(200).json({ ...CACHE.payload, cached: true });
   }
 
   try {
     const payload = await load();
     CACHE = { payload, at: Date.now() };
+    if (have && have === payload.hash && !debug) return res.status(200).json(unchanged(payload));
     if (debug) {
       return res.status(200).json({
-        ok: true, via: payload.via, attempts: payload.attempts,
+        ok: true, via: payload.via, hash: payload.hash, attempts: payload.attempts,
         url: SHARE_URL.split('?')[0] + '?…', bytes: payload.bytes,
         tabsFound: payload.tabsFound,
         lookingFor: { tracker: TAB_TRACKER, requisitions: TAB_REQS },
