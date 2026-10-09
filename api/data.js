@@ -29,9 +29,69 @@ const TIMEOUT_MS = 25000;
 
 let CACHE = { payload: null, at: 0 };
 
-/* A SharePoint sharing link serves an HTML viewer by default; download=1 makes
-   it serve the file. We follow redirects and then check we really got a file. */
-const directUrl = u => u + (u.includes('?') ? '&' : '?') + 'download=1';
+/* Getting the bytes of an anonymously-shared SharePoint file is fiddly: a plain
+   sharing URL serves an HTML viewer, and ?download=1 alone is not always enough
+   on /:x:/g/personal/ links. So we try several known forms and take the first
+   that actually returns a zip (every .xlsx starts with "PK").
+
+   The first one is the important one: api.onedrive.com resolves a share token
+   with no authentication at all, provided the link is "Anyone with the link".
+   The share id is "u!" + unpadded base64url of the full sharing URL. */
+const shareId = u => 'u!' + Buffer.from(u, 'utf8').toString('base64')
+  .replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+
+function strategies(u) {
+  const out = [];
+  const id = shareId(u);
+  out.push({ name: 'onedrive-shares-root', url: 'https://api.onedrive.com/v1.0/shares/' + id + '/root/content' });
+  out.push({ name: 'onedrive-shares-driveitem', url: 'https://api.onedrive.com/v1.0/shares/' + id + '/driveItem/content' });
+  out.push({ name: 'download-param', url: u + (u.includes('?') ? '&' : '?') + 'download=1' });
+  if (u.includes('/:x:/')) {
+    const generic = u.replace('/:x:/', '/:u:/');
+    out.push({ name: 'generic-u-download', url: generic + (generic.includes('?') ? '&' : '?') + 'download=1' });
+  }
+  /* host/personal/<user>/_layouts/15/download.aspx?share=<token> */
+  const m = u.match(/^(https:\/\/[^/]+)\/:[a-z]:\/[a-z]\/(personal\/[^/]+)\/([^?]+)/i);
+  if (m) out.push({ name: 'layouts-download-aspx', url: m[1] + '/' + m[2] + '/_layouts/15/download.aspx?share=' + m[3] });
+  return out;
+}
+
+const isZip = b => b.length > 4 && b[0] === 0x50 && b[1] === 0x4b;
+
+async function grab(url, signal) {
+  const r = await fetch(url, {
+    signal, redirect: 'follow',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+      'Accept': 'application/octet-stream,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*'
+    }
+  });
+  const buf = Buffer.from(await r.arrayBuffer());
+  return {
+    status: r.status, ok: r.ok, bytes: buf.length,
+    contentType: r.headers.get('content-type') || '',
+    zip: isZip(buf),
+    head: isZip(buf) ? 'PK (xlsx)' : buf.slice(0, 120).toString('utf8').replace(/\s+/g, ' ').trim(),
+    buf
+  };
+}
+
+/* Tries each strategy, returns the buffer from the first that yields a zip.
+   The attempt log comes back either way so ?debug=1 can show what happened. */
+async function fetchWorkbook(signal) {
+  const log = [];
+  for (const s of strategies(SHARE_URL)) {
+    try {
+      const r = await grab(s.url, signal);
+      log.push({ strategy: s.name, status: r.status, bytes: r.bytes, contentType: r.contentType, got: r.head.slice(0, 90) });
+      if (r.zip) return { buf: r.buf, via: s.name, log };
+    } catch (e) {
+      log.push({ strategy: s.name, error: String((e && e.message) || e) });
+      if (e && e.name === 'AbortError') throw e;
+    }
+  }
+  return { buf: null, via: null, log };
+}
 
 /* The dashboard's pdate() expects dd/mm/yyyy.
 
@@ -91,31 +151,19 @@ async function load() {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const r = await fetch(directUrl(SHARE_URL), {
-      signal: ctl.signal, redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HRDashboard/1.0)' }
-    });
-    if (!r.ok) throw new Error('SharePoint returned HTTP ' + r.status + ' for the sharing link.');
-
-    const buf = Buffer.from(await r.arrayBuffer());
-
-    /* Every .xlsx is a zip, so it starts with "PK". Anything else means we were
-       handed a sign-in page instead of the file. */
-    if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
-      const head = buf.slice(0, 400).toString('utf8');
-      const signIn = /sign ?in|login|redirect|authenticat/i.test(head);
-      throw new Error(signIn
-        ? 'SharePoint served a sign-in page instead of the file. The sharing link is restricted. '
-          + 'In SharePoint open HR_data.xlsx → Share → the gear/settings on the link → set it to '
-          + '"Anyone with the link" (Can view), then use that new link.'
-        : 'The sharing link did not return an .xlsx file (got ' + buf.length + ' bytes starting "'
-          + head.slice(0, 40).replace(/\s+/g, ' ') + '").');
+    const { buf, via, log } = await fetchWorkbook(ctl.signal);
+    if (!buf) {
+      const e = new Error('None of the download methods returned the file. '
+        + 'Every attempt came back as a web page, which means the link still needs a sign-in. '
+        + 'Check the link opens in a private/incognito window without logging in.');
+      e.attempts = log;
+      throw e;
     }
 
     const wb = XLSX.read(buf, { type: 'buffer', cellNF: true, cellText: true });
     const tr = rowsOf(wb, TAB_TRACKER);
     const rq = rowsOf(wb, TAB_REQS);
-    if (tr.error) throw new Error(tr.error);
+    if (tr.error) { const e = new Error(tr.error); e.attempts = log; throw e; }
 
     return {
       tracker: tr.rows,
@@ -123,6 +171,8 @@ async function load() {
       reqsError: rq.error || null,
       tabsFound: wb.SheetNames,
       bytes: buf.length,
+      via,
+      attempts: log,
       fetchedAt: new Date().toISOString()
     };
   } finally { clearTimeout(timer); }
@@ -141,7 +191,8 @@ module.exports = async (req, res) => {
     CACHE = { payload, at: Date.now() };
     if (debug) {
       return res.status(200).json({
-        ok: true, url: SHARE_URL.split('?')[0] + '?…', bytes: payload.bytes,
+        ok: true, via: payload.via, attempts: payload.attempts,
+        url: SHARE_URL.split('?')[0] + '?…', bytes: payload.bytes,
         tabsFound: payload.tabsFound,
         lookingFor: { tracker: TAB_TRACKER, requisitions: TAB_REQS },
         trackerRows: payload.tracker.length, requisitionRows: payload.reqs.length,
@@ -156,6 +207,7 @@ module.exports = async (req, res) => {
     return res.status(aborted ? 504 : 502).json({
       error: aborted ? 'timeout' : 'failed',
       message: aborted ? 'SharePoint did not respond within 25 seconds.' : String((e && e.message) || e),
+      attempts: e && e.attempts || null,
       url: SHARE_URL.split('?')[0] + '?…'
     });
   }
