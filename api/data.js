@@ -1,253 +1,228 @@
 /* ---------------------------------------------------------------------------
-   HR Dashboard — reads the workbook from Microsoft 365 via the Graph API.
+   HR Dashboard — reads HR_data.xlsx from SharePoint. No configuration needed.
 
-   App-only (client credentials): the function signs in as an Azure AD
-   application, so the file can stay PRIVATE in SharePoint/OneDrive. Nothing is
-   shared publicly and no credential is ever sent to the browser.
+   Why this file exists at all: the browser cannot fetch the workbook itself,
+   because SharePoint sends no Access-Control-Allow-Origin header. CORS is a
+   browser rule, not a server one — so this function downloads the file
+   server-side and hands the browser plain JSON from its own origin.
 
-   GET /api/data          -> { tracker: [[...]], reqs: [[...]], hash, fetchedAt }
-   GET /api/data?v=<hash> -> { unchanged: true } when nothing moved (cheap poll)
-   GET /api/data?debug=1  -> configuration / connection check, no row data
+   The only requirement is that the sharing link is set to
+   "Anyone with the link" in SharePoint. No Azure app, no keys, no env vars.
 
-   Rows are arrays of strings with column A at index 0 — the same shape the old
-   loader produced, so buildCands()/buildReqs() are unchanged.
+   GET /api/data         -> { tracker: [[...]], reqs: [[...]], fetchedAt }
+   GET /api/data?debug=1 -> what it managed to read, without the row data
 
-   Environment variables (Vercel -> Settings -> Environment Variables):
-     TENANT_ID        Directory (tenant) ID
-     CLIENT_ID        Application (client) ID
-     CLIENT_SECRET    Client secret VALUE (not the secret ID)
-     SITE_HOSTNAME    e.g. elixirengineering.sharepoint.com
-     SITE_PATH        e.g. /sites/HR          (site-relative path)
-     FILE_PATH        e.g. Shared Documents/HR_data.xlsx   (path inside the drive)
-     SHEET_NAME       e.g. Recruitment Tracker
-   Also used:
-     SHEET_NAME_REQS  requisitions tab, default "Sheet3" (the dashboard reads two
-                      tabs; set this if yours is named differently)
-     DRIVE_USER       use INSTEAD of SITE_HOSTNAME/SITE_PATH when the file lives on
-                      a person's OneDrive rather than a SharePoint site, e.g.
-                      aliasgark@elixirengg.com
-     CACHE_SECONDS    default 60
-
-   Graph permission required (Application, with admin consent):
-     Sites.Read.All   when using SITE_HOSTNAME + SITE_PATH
-     Files.Read.All   when using DRIVE_USER
+   Rows come back as arrays of strings, column A at index 0 — the same shape the
+   old Google gviz endpoint produced, so buildCands()/buildReqs() are unchanged.
 --------------------------------------------------------------------------- */
 
+const XLSX = require('xlsx');
 const crypto = require('crypto');
 
-const GRAPH = 'https://graph.microsoft.com/v1.0';
+/* Override with HR_XLSX_URL if the file ever moves. */
+const SHARE_URL = process.env.HR_XLSX_URL ||
+  'https://elixirengineering-my.sharepoint.com/:x:/g/personal/aliasgark_elixirengg_com/IQCXhg2hv-SoUK7mASENzSQvAbt88jrfKK0wgaiZ2itLX_s';
+
+const TAB_TRACKER = process.env.HR_TAB_TRACKER || 'Recruitment Tracker';
+const TAB_REQS = process.env.HR_TAB_REQS || 'Sheet3';
+const CACHE_MS = Math.max(0, parseInt(process.env.CACHE_SECONDS || '5', 10)) * 1000;
 const TIMEOUT_MS = 25000;
 
-const env = k => (process.env[k] || '').trim();
-const CFG = () => ({
-  tenant: env('TENANT_ID'),
-  clientId: env('CLIENT_ID'),
-  secret: env('CLIENT_SECRET'),
-  host: env('SITE_HOSTNAME'),
-  sitePath: env('SITE_PATH'),
-  filePath: env('FILE_PATH'),
-  sheet: env('SHEET_NAME') || 'Recruitment Tracker',
-  sheetReqs: env('SHEET_NAME_REQS') || 'Sheet3',
-  driveUser: env('DRIVE_USER'),
-  cacheMs: Math.max(0, parseInt(env('CACHE_SECONDS') || '60', 10) || 60) * 1000
-});
-
-/* module-scope caches survive between invocations on a warm lambda */
-let TOKEN = { value: null, exp: 0 };
-let DRIVE = { base: null, at: 0 };
 let CACHE = { payload: null, at: 0 };
 
-const fail = (msg, step) => { const e = new Error(msg); e.step = step; return e; };
+/* Getting the bytes of an anonymously-shared SharePoint file is fiddly: a plain
+   sharing URL serves an HTML viewer, and ?download=1 alone is not always enough
+   on /:x:/g/personal/ links. So we try several known forms and take the first
+   that actually returns a zip (every .xlsx starts with "PK").
 
-/* ---------- auth ---------- */
-async function getToken(c, signal) {
-  if (TOKEN.value && Date.now() < TOKEN.exp - 60000) return TOKEN.value;
-  const r = await fetch('https://login.microsoftonline.com/' + encodeURIComponent(c.tenant) + '/oauth2/v2.0/token', {
-    method: 'POST', signal,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: c.clientId,
-      client_secret: c.secret,
-      scope: 'https://graph.microsoft.com/.default',
-      grant_type: 'client_credentials'
-    })
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.access_token) {
-    throw fail('Sign-in to Microsoft failed: ' + (j.error_description || j.error || ('HTTP ' + r.status))
-      + ' — check TENANT_ID, CLIENT_ID and CLIENT_SECRET (the secret VALUE, not its ID).', 'token');
+   The first one is the important one: api.onedrive.com resolves a share token
+   with no authentication at all, provided the link is "Anyone with the link".
+   The share id is "u!" + unpadded base64url of the full sharing URL. */
+const shareId = u => 'u!' + Buffer.from(u, 'utf8').toString('base64')
+  .replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-');
+
+function strategies(u) {
+  const out = [];
+  const id = shareId(u);
+  out.push({ name: 'onedrive-shares-root', url: 'https://api.onedrive.com/v1.0/shares/' + id + '/root/content' });
+  out.push({ name: 'onedrive-shares-driveitem', url: 'https://api.onedrive.com/v1.0/shares/' + id + '/driveItem/content' });
+  out.push({ name: 'download-param', url: u + (u.includes('?') ? '&' : '?') + 'download=1' });
+  if (u.includes('/:x:/')) {
+    const generic = u.replace('/:x:/', '/:u:/');
+    out.push({ name: 'generic-u-download', url: generic + (generic.includes('?') ? '&' : '?') + 'download=1' });
   }
-  TOKEN = { value: j.access_token, exp: Date.now() + ((j.expires_in || 3600) * 1000) };
-  return TOKEN.value;
+  /* host/personal/<user>/_layouts/15/download.aspx?share=<token> */
+  const m = u.match(/^(https:\/\/[^/]+)\/:[a-z]:\/[a-z]\/(personal\/[^/]+)\/([^?]+)/i);
+  if (m) out.push({ name: 'layouts-download-aspx', url: m[1] + '/' + m[2] + '/_layouts/15/download.aspx?share=' + m[3] });
+  return out;
 }
 
-async function gget(url, tok, signal) {
-  const r = await fetch(url, { signal, headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json' } });
-  const txt = await r.text();
-  let j = null; try { j = JSON.parse(txt); } catch { /* non-JSON body */ }
-  return { ok: r.ok, status: r.status, json: j, text: txt };
-}
+const isZip = b => b.length > 4 && b[0] === 0x50 && b[1] === 0x4b;
 
-/* ---------- locate the drive that holds the file ---------- */
-async function driveBase(c, tok, signal) {
-  if (DRIVE.base && Date.now() - DRIVE.at < 3600000) return DRIVE.base;
-
-  let base;
-  if (c.driveUser) {
-    base = GRAPH + '/users/' + encodeURIComponent(c.driveUser) + '/drive';
-  } else {
-    const path = c.sitePath.replace(/^\/+|\/+$/g, '');
-    const url = GRAPH + '/sites/' + encodeURIComponent(c.host) + ':/' + path;
-    const r = await gget(url, tok, signal);
-    if (!r.ok || !r.json || !r.json.id) {
-      throw fail('Could not find the SharePoint site "' + c.host + c.sitePath + '": '
-        + ((r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status))
-        + ' — check SITE_HOSTNAME and SITE_PATH, and that Sites.Read.All has admin consent.', 'site');
+async function grab(url, signal) {
+  const r = await fetch(url, {
+    signal, redirect: 'follow',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+      'Accept': 'application/octet-stream,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*'
     }
-    base = GRAPH + '/sites/' + r.json.id + '/drive';
-  }
-  DRIVE = { base, at: Date.now() };
-  return base;
+  });
+  const buf = Buffer.from(await r.arrayBuffer());
+  return {
+    status: r.status, ok: r.ok, bytes: buf.length,
+    contentType: r.headers.get('content-type') || '',
+    zip: isZip(buf),
+    head: isZip(buf) ? 'PK (xlsx)' : buf.slice(0, 120).toString('utf8').replace(/\s+/g, ' ').trim(),
+    buf
+  };
 }
 
-/* ---------- dates ----------
-   Graph hands back Excel date cells as serial numbers. Converting them through
-   any local-time Date path shifts them a day, which would silently corrupt every
-   figure in the dashboard, so we do pure UTC arithmetic.
-   25569 = days between the Excel epoch (1899-12-30) and the Unix epoch. */
+/* Tries each strategy, returns the buffer from the first that yields a zip.
+   The attempt log comes back either way so ?debug=1 can show what happened. */
+async function fetchWorkbook(signal) {
+  const log = [];
+  for (const s of strategies(SHARE_URL)) {
+    try {
+      const r = await grab(s.url, signal);
+      log.push({ strategy: s.name, status: r.status, bytes: r.bytes, contentType: r.contentType, got: r.head.slice(0, 90) });
+      if (r.zip) return { buf: r.buf, via: s.name, log };
+    } catch (e) {
+      log.push({ strategy: s.name, error: String((e && e.message) || e) });
+      if (e && e.name === 'AbortError') throw e;
+    }
+  }
+  return { buf: null, via: null, log };
+}
+
+/* The dashboard's pdate() expects dd/mm/yyyy.
+
+   Dates are the one thing that can silently corrupt this whole dashboard, so we
+   do NOT let SheetJS hand us Date objects: cellDates:true converts through the
+   server's local timezone and round-trips a day early (9 Jul comes back as 8
+   Jul). Instead we take the raw Excel serial and convert it with pure UTC
+   arithmetic, which no timezone can touch. 25569 = days between the Excel
+   epoch (1899-12-30) and the Unix epoch. */
 const two = n => String(n).padStart(2, '0');
 function serialToDMY(n) {
   const d = new Date(Math.round((n - 25569) * 86400000));
   if (isNaN(d)) return String(n);
   return two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear();
 }
-/* "dd\-mm\-yyyy" and "m/d/yy" are dates; "General", "0.00", "#,##0" are not */
-const isDateFmt = f => typeof f === 'string' && !/^general$/i.test(f.trim())
-  && /y/i.test(f) && /[dm]/i.test(f) && !/[#?]/.test(f);
 
-/* "Recruitment Tracker!C3:T1153" -> 2 (zero-based first used column) */
-function colOffset(address) {
-  const m = String(address || '').match(/!\$?([A-Z]+)\$?\d+/i);
-  if (!m) return 0;
-  let n = 0;
-  for (const ch of m[1].toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
-  return n - 1;
-}
-
-/* ---------- read one worksheet ---------- */
-async function sheetRows(base, tok, name, signal) {
-  const url = base + "/root:/" + encodeURI(CFG().filePath) + ":/workbook/worksheets('"
-    + encodeURIComponent(name) + "')/usedRange(valuesOnly=true)"
-    + "?$select=address,text,values,numberFormat";
-  const r = await gget(url, tok, signal);
-  if (!r.ok) {
-    const m = (r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status);
-    return { error: 'worksheet "' + name + '" could not be read: ' + m };
+function cellText(c) {
+  if (!c) return '';
+  if (c.t === 'n') {
+    const isDate = (c.z && XLSX.SSF && XLSX.SSF.is_date(c.z))
+      || (!c.z && typeof c.w === 'string' && /^\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}$/.test(c.w.trim()));
+    return isDate ? serialToDMY(c.v) : String(c.v);
   }
-  const text = (r.json && r.json.text) || [];
-  const vals = (r.json && r.json.values) || [];
-  const fmts = (r.json && r.json.numberFormat) || [];
-  const pad = colOffset(r.json && r.json.address);
+  if (c.t === 'd' && c.v instanceof Date) {            // only if some path yields a Date
+    return two(c.v.getUTCDate()) + '/' + two(c.v.getUTCMonth() + 1) + '/' + c.v.getUTCFullYear();
+  }
+  if (c.t === 'b') return c.v ? 'TRUE' : 'FALSE';
+  return String(c.v == null ? '' : c.v).trim();
+}
 
-  const rows = text.map((row, i) => {
-    const out = new Array(pad).fill('');
-    for (let c = 0; c < row.length; c++) {
-      const v = vals[i] ? vals[i][c] : null;
-      const f = fmts[i] ? fmts[i][c] : null;
-      if (typeof v === 'number' && isDateFmt(f)) out.push(serialToDMY(v));
-      else if (row[c] !== '' && row[c] != null) out.push(String(row[c]).trim());
-      else out.push(v == null ? '' : String(v).trim());
+/* Walk the sheet by address rather than using sheet_to_json, so column A is
+   always index 0 even when the used range starts further right. */
+function gridOf(ws) {
+  if (!ws || !ws['!ref']) return [];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const out = [];
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const row = [];
+    for (let Cc = 0; Cc <= range.e.c; Cc++) {
+      row.push(cellText(ws[XLSX.utils.encode_cell({ r: R, c: Cc })]));
     }
-    return out;
-  });
-  return { rows, address: r.json && r.json.address };
+    out.push(row);
+  }
+  return out;
 }
 
-/* ---------- the whole read ---------- */
-async function load(c, signal) {
-  const tok = await getToken(c, signal);
-  const base = await driveBase(c, tok, signal);
-
-  const tr = await sheetRows(base, tok, c.sheet, signal);
-  if (tr.error) throw fail(tr.error + ' — check FILE_PATH and SHEET_NAME.', 'sheet');
-
-  /* the requisitions tab is optional; the dashboard runs on the tracker alone */
-  const rq = await sheetRows(base, tok, c.sheetReqs, signal);
-
-  const tracker = tr.rows, reqs = rq.error ? [] : rq.rows;
-  const hash = crypto.createHash('sha1')
-    .update(JSON.stringify([tracker, reqs])).digest('hex').slice(0, 16);
-
-  return {
-    tracker, reqs,
-    reqsError: rq.error || null,
-    hash,
-    addresses: { tracker: tr.address, reqs: rq.address || null },
-    fetchedAt: new Date().toISOString()
-  };
+function rowsOf(wb, wanted) {
+  /* tolerate a renamed or re-cased tab rather than failing outright */
+  const names = wb.SheetNames;
+  const hit = names.find(n => n === wanted)
+    || names.find(n => n.trim().toLowerCase() === wanted.trim().toLowerCase());
+  if (!hit) return { error: 'tab "' + wanted + '" not found. Tabs present: ' + names.join(', ') };
+  return { name: hit, rows: gridOf(wb.Sheets[hit]) };
 }
 
-/* ---------- handler ---------- */
+async function load() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  try {
+    const { buf, via, log } = await fetchWorkbook(ctl.signal);
+    if (!buf) {
+      const e = new Error('None of the download methods returned the file. '
+        + 'Every attempt came back as a web page, which means the link still needs a sign-in. '
+        + 'Check the link opens in a private/incognito window without logging in.');
+      e.attempts = log;
+      throw e;
+    }
+
+    const wb = XLSX.read(buf, { type: 'buffer', cellNF: true, cellText: true });
+    const tr = rowsOf(wb, TAB_TRACKER);
+    const rq = rowsOf(wb, TAB_REQS);
+    if (tr.error) { const e = new Error(tr.error); e.attempts = log; throw e; }
+
+    const tracker = tr.rows, reqs = rq.error ? [] : rq.rows;
+    /* hash the actual cell contents: the client sends back the hash it already
+       holds, and a poll that finds nothing new returns ~60 bytes instead of
+       the whole sheet. That is what makes a 5-second refresh affordable. */
+    const hash = crypto.createHash('sha1')
+      .update(JSON.stringify([tracker, reqs])).digest('hex').slice(0, 16);
+
+    return {
+      tracker, reqs,
+      reqsError: rq.error || null,
+      tabsFound: wb.SheetNames,
+      bytes: buf.length,
+      hash,
+      via,
+      attempts: log,
+      fetchedAt: new Date().toISOString()
+    };
+  } finally { clearTimeout(timer); }
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const c = CFG();
   const debug = req.query && req.query.debug;
+
+  /* the client passes the hash it already has; if nothing moved, say so cheaply */
   const have = req.query && req.query.v;
   const unchanged = p => ({ unchanged: true, hash: p.hash, fetchedAt: p.fetchedAt });
 
-  const required = ['TENANT_ID', 'CLIENT_ID', 'CLIENT_SECRET', 'FILE_PATH', 'SHEET_NAME'];
-  const missing = required.filter(k => !env(k));
-  if (!c.driveUser && (!c.host || !c.sitePath)) missing.push('SITE_HOSTNAME + SITE_PATH (or DRIVE_USER)');
-
-  if (missing.length) {
-    return res.status(503).json({
-      error: 'not_configured', missingEnvVars: missing,
-      message: 'Set these in Vercel -> Settings -> Environment Variables, then redeploy.'
-    });
-  }
-
-  /* a poll inside the cache window costs ~60 bytes when nothing has changed */
-  if (CACHE.payload && Date.now() - CACHE.at < c.cacheMs && !debug) {
+  if (CACHE.payload && Date.now() - CACHE.at < CACHE_MS && !debug) {
     if (have && have === CACHE.payload.hash) return res.status(200).json(unchanged(CACHE.payload));
     return res.status(200).json({ ...CACHE.payload, cached: true });
   }
 
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const payload = await load(c, ctl.signal);
+    const payload = await load();
     CACHE = { payload, at: Date.now() };
-
+    if (have && have === payload.hash && !debug) return res.status(200).json(unchanged(payload));
     if (debug) {
       return res.status(200).json({
-        ok: true,
-        mode: c.driveUser ? 'user drive (DRIVE_USER)' : 'sharepoint site (SITE_HOSTNAME + SITE_PATH)',
-        site: c.driveUser || (c.host + c.sitePath),
-        filePath: c.filePath,
-        sheets: { tracker: c.sheet, requisitions: c.sheetReqs },
-        addresses: payload.addresses,
-        trackerRows: payload.tracker.length,
-        requisitionRows: payload.reqs.length,
+        ok: true, via: payload.via, hash: payload.hash, attempts: payload.attempts,
+        url: SHARE_URL.split('?')[0] + '?…', bytes: payload.bytes,
+        tabsFound: payload.tabsFound,
+        lookingFor: { tracker: TAB_TRACKER, requisitions: TAB_REQS },
+        trackerRows: payload.tracker.length, requisitionRows: payload.reqs.length,
         reqsError: payload.reqsError,
-        hash: payload.hash,
-        cacheSeconds: c.cacheMs / 1000,
-        firstTrackerRow: payload.tracker[0],
-        secondTrackerRow: payload.tracker[1],
+        firstTrackerRow: payload.tracker[0], secondTrackerRow: payload.tracker[1],
         fetchedAt: payload.fetchedAt
       });
     }
-    if (have && have === payload.hash) return res.status(200).json(unchanged(payload));
     return res.status(200).json({ ...payload, cached: false });
-
   } catch (e) {
     const aborted = e && (e.name === 'AbortError' || /abort/i.test(String(e.message || '')));
-    if (e && e.step === 'token') TOKEN = { value: null, exp: 0 };
-    if (e && e.step === 'site') DRIVE = { base: null, at: 0 };
     return res.status(aborted ? 504 : 502).json({
-      error: aborted ? 'timeout' : (e && e.step) || 'failed',
-      failedAt: (e && e.step) || null,
-      message: aborted ? 'Microsoft Graph did not respond within 25 seconds.'
-        : String((e && e.message) || e)
+      error: aborted ? 'timeout' : 'failed',
+      message: aborted ? 'SharePoint did not respond within 25 seconds.' : String((e && e.message) || e),
+      attempts: e && e.attempts || null,
+      url: SHARE_URL.split('?')[0] + '?…'
     });
-  } finally { clearTimeout(timer); }
+  }
 };

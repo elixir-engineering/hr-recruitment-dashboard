@@ -2,6 +2,8 @@
   "name": "hr-recruitment-dashboard",
   "private": true,
   "version": "1.0.0",
-  "description": "HR recruitment dashboard reading HR_data.xlsx from Microsoft 365 via the Graph API",
-  "dependencies": {}
+  "description": "HR recruitment dashboard reading HR_data.xlsx from SharePoint",
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
 }
