@@ -231,8 +231,11 @@ module.exports = async (req, res) => {
         reqsError: payload.reqsError,
         hash: payload.hash,
         cacheSeconds: c.cacheMs / 1000,
-        firstTrackerRow: payload.tracker[0],
-        secondTrackerRow: payload.tracker[1],
+        /* first rows of each tab, so column positions can be eyeballed —
+           the parser reads by position, so a column inserted mid-sheet shifts
+           every field after it without raising any error */
+        trackerFirstRows: payload.tracker.slice(0, 5),
+        reqsFirstRows: payload.reqs.slice(0, 3),
         fetchedAt: payload.fetchedAt
       });
     }
