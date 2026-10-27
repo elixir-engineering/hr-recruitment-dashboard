@@ -1,0 +1,10 @@
+# Credentials — never commit. These belong in Vercel environment variables only.
+*application details*
+*credentials*
+*secret*
+.env
+.env.*
+*.local
+
+# Node
+node_modules/

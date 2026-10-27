@@ -3,54 +3,67 @@
 Single-page dashboard over `HR_data.xlsx` on SharePoint, deployed on Vercel.
 
 - `index.html` — the whole dashboard. Reads live data from `/api/data`, falls back to an embedded snapshot.
-- `api/data.js` — downloads the workbook server-side and returns its rows as JSON.
-- `package.json` — one dependency, SheetJS, for reading the .xlsx.
+- `api/data.js` — signs in to Microsoft and reads the workbook through the Graph API.
+- `package.json` — no dependencies; the route uses plain `fetch`.
 
-## There is nothing to configure
+## Setup
 
-The file's SharePoint link is in `api/data.js`. No keys, no Azure app, no environment variables.
+The workbook stays **private**. The route signs in as an Azure AD application
+(client credentials) and reads it through the Microsoft Graph API. No sharing
+link, no anonymous access, and no credential ever reaches the browser.
 
-The only reason this function exists is that the browser cannot fetch the workbook itself —
-SharePoint sends no `Access-Control-Allow-Origin` header, so JavaScript on `vercel.app` is
-blocked. CORS is a browser rule, not a server one, so the function downloads the file and
-hands the browser JSON from its own origin.
+### 1. Register an app (needs a Microsoft 365 admin, once)
 
-## The one requirement
+<https://portal.azure.com> → **Microsoft Entra ID** → **App registrations** → **New registration**
 
-**The sharing link must be set to "Anyone with the link".**
+- Name: `HR Dashboard Reader`, accounts: *this organizational directory only*, no redirect URI.
+- **Overview** → copy **Application (client) ID** and **Directory (tenant) ID**.
+- **Certificates & secrets** → **New client secret** → copy the **Value** immediately
+  (shown once; the "Secret ID" is *not* it).
+- **API permissions** → **Microsoft Graph** → **Application permissions** →
+  add **`Sites.Read.All`** (or `Files.Read.All` if using `DRIVE_USER`) →
+  **Grant admin consent**.
 
-In SharePoint: open `HR_data.xlsx` → **Share** → click the settings/gear on the link →
-**Anyone with the link** → *Can view* → copy that link.
+### 2. Environment variables in Vercel
 
-If it is restricted instead, SharePoint serves a sign-in page rather than the file. The
-dashboard detects this exactly and says so, rather than showing wrong numbers.
+**Settings → Environment Variables** (Production, Preview and Development):
 
-If your tenant blocks anonymous links entirely, tell me — the fallback is a Microsoft Graph
-app registration, which works but needs an admin.
+| Name | Example |
+|---|---|
+| `TENANT_ID` | Directory (tenant) ID |
+| `CLIENT_ID` | Application (client) ID |
+| `CLIENT_SECRET` | the secret **Value** |
+| `SITE_HOSTNAME` | `elixirengineering.sharepoint.com` |
+| `SITE_PATH` | `/sites/HR` |
+| `FILE_PATH` | `Shared Documents/HR_data.xlsx` |
+| `SHEET_NAME` | `Recruitment Tracker` |
 
-## If the link ever changes
+Also available: `SHEET_NAME_REQS` (default `Sheet3`), `CACHE_SECONDS` (default `60`).
 
-Either edit `SHARE_URL` at the top of `api/data.js`, or set `HR_XLSX_URL` in Vercel's
-environment variables to override it without touching the code.
+**If the file is on someone's OneDrive** rather than a SharePoint site, leave
+`SITE_HOSTNAME`/`SITE_PATH` unset and instead set `DRIVE_USER` to their UPN
+(e.g. `aliasgark@elixirengg.com`) with `Files.Read.All` consented. `FILE_PATH`
+is then the path inside their OneDrive, e.g. `Documents/HR_data.xlsx`.
 
-Optional overrides: `HR_TAB_TRACKER` (default `Recruitment Tracker`),
-`HR_TAB_REQS` (default `Sheet3`), `CACHE_SECONDS` (default `60`).
+Then **redeploy** — environment variables only apply to new builds.
 
-## Checking it
+### 3. Check it
 
-Open `https://your-site.vercel.app/api/data?debug=1`. It shows the tabs found in the
-workbook, how many rows each returned, and the first two tracker rows — enough to spot a
-renamed tab or a shifted column immediately.
+`https://your-site.vercel.app/api/data?debug=1` reports which variables are
+missing, which step failed (`token`, `site`, `sheet`), the resolved used-range
+addresses and the first two rows. No secret is exposed.
 
 ## Notes
 
-- **Dates** are converted from Excel serial numbers using UTC arithmetic, not SheetJS's
-  `cellDates`, which shifts them a day through the server's timezone. Do not "simplify"
-  this — it silently corrupts every date in the dashboard.
-- Tab lookup is case-insensitive and tolerates stray spaces.
+- **Dates** arrive from Graph as Excel serial numbers and are converted with pure UTC
+  arithmetic. Any local-time conversion shifts them a day and silently corrupts every
+  figure in the dashboard — do not "simplify" this.
+- **Client secrets expire** (24 months max, often 6). When one does, the dashboard falls
+  back to the snapshot and `?debug=1` reports `failedAt: "token"`. Set a reminder.
 - Columns are read by position from column A, so inserting a column in the middle of the
   sheet will shift everything. Add new columns at the right-hand end.
-- 60-second server-side cache; the page itself re-reads every 5 minutes.
+- 60-second server-side cache. The page polls every 5 seconds but sends the content
+  hash it already holds, so an unchanged poll returns ~80 bytes instead of the whole sheet.
 - `.gitattributes` pins `*.html` to LF endings, so Windows CRLF does not turn every commit
   into a full-file diff.
 - The Period filter selects candidates by **CV month**. Joined / Still with us / Joined &
