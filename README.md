@@ -1,57 +1,67 @@
 # HR Recruitment Dashboard
 
-Single-page dashboard over `HR_data.xlsx` on SharePoint, deployed on Vercel.
+Single-page dashboard over `HR_data.xlsx` on Microsoft 365, deployed on Vercel.
 
 - `index.html` — the whole dashboard. Reads live data from `/api/data`, falls back to an embedded snapshot.
 - `api/data.js` — signs in to Microsoft and reads the workbook through the Graph API.
 - `package.json` — no dependencies; the route uses plain `fetch`.
 
-## Setup
+## How it reads the data
 
-The workbook stays **private**. The route signs in as an Azure AD application
-(client credentials) and reads it through the Microsoft Graph API. No sharing
-link, no anonymous access, and no credential ever reaches the browser.
+`HR_data.xlsx` is **private** on Ali Asgar's OneDrive. The route signs in as an Azure AD
+application (client credentials) and reads it through Microsoft Graph, so no sharing link
+exists and no credential ever reaches the browser.
 
-### 1. Register an app (needs a Microsoft 365 admin, once)
+### Live configuration
 
-<https://portal.azure.com> → **Microsoft Entra ID** → **App registrations** → **New registration**
+Set in Vercel → Settings → Environment Variables:
 
-- Name: `HR Dashboard Reader`, accounts: *this organizational directory only*, no redirect URI.
-- **Overview** → copy **Application (client) ID** and **Directory (tenant) ID**.
-- **Certificates & secrets** → **New client secret** → copy the **Value** immediately
-  (shown once; the "Secret ID" is *not* it).
-- **API permissions** → **Microsoft Graph** → **Application permissions** →
-  add **`Sites.Read.All`** (or `Files.Read.All` if using `DRIVE_USER`) →
-  **Grant admin consent**.
-
-### 2. Environment variables in Vercel
-
-**Settings → Environment Variables** (Production, Preview and Development):
-
-| Name | Example |
+| Name | Value |
 |---|---|
 | `TENANT_ID` | Directory (tenant) ID |
 | `CLIENT_ID` | Application (client) ID |
-| `CLIENT_SECRET` | the secret **Value** |
-| `SITE_HOSTNAME` | `elixirengineering.sharepoint.com` |
-| `SITE_PATH` | `/sites/HR` |
-| `FILE_PATH` | `Shared Documents/HR_data.xlsx` |
+| `CLIENT_SECRET` | client secret **Value** |
+| `DRIVE_USER` | `aliasgark@elixirengg.com` |
+| `FILE_PATH` | `HR_data.xlsx` |
 | `SHEET_NAME` | `Recruitment Tracker` |
 
-Also available: `SHEET_NAME_REQS` (default `Sheet3`), `CACHE_SECONDS` (default `60`).
+Optional: `SHEET_NAME_REQS` (default `Sheet3`), `CACHE_SECONDS` (default `60`).
 
-**If the file is on someone's OneDrive** rather than a SharePoint site, leave
-`SITE_HOSTNAME`/`SITE_PATH` unset and instead set `DRIVE_USER` to their UPN
-(e.g. `aliasgark@elixirengg.com`) with `Files.Read.All` consented. `FILE_PATH`
-is then the path inside their OneDrive, e.g. `Documents/HR_data.xlsx`.
+`SITE_HOSTNAME` / `SITE_PATH` are deliberately **unset** — setting them switches the route
+into SharePoint-site mode, which cannot find a file on a personal OneDrive. They exist for
+if the workbook ever moves into a SharePoint document library.
 
-Then **redeploy** — environment variables only apply to new builds.
+### The Azure app
 
-### 3. Check it
+Registered as `HR Dashboard Reader`, single tenant, with the Microsoft Graph **application**
+permission `Files.Read.All` and tenant admin consent granted. Read-only on purpose: the
+dashboard never writes, and `Files.ReadWrite.All` would mean a leaked secret could alter any
+file in the tenant.
 
-`https://your-site.vercel.app/api/data?debug=1` reports which variables are
-missing, which step failed (`token`, `site`, `sheet`), the resolved used-range
-addresses and the first two rows. No secret is exposed.
+Note the app has **no redirect URI**, which is correct for client credentials. One side
+effect: the `/adminconsent` URL does not work for it (AADSTS500113) — an admin must grant
+consent from the portal's API permissions page instead.
+
+### Checking it
+
+`/api/data?debug=1` reports missing variables, which step failed (`token`, `site`, `sheet`),
+the resolved used-range addresses, and the first rows of each tab. No secret is exposed.
+
+### Sheet layout
+
+Columns are read **by position**, not by header name:
+
+- Tracker: A Date, B Name, D CV date, E Job code + position, F Source, G Mode,
+  H Interviewer, I Recruiter, J Location, K Status, L Interview date, M Current salary,
+  N Expected salary, O Selected date, P Joining date, R Remark.
+  Columns S–V (computed day-counts) are ignored.
+- Sheet3: B Designation, C Location, D Status, E Start, F End, G Department, H Nos,
+  I On board, J Balance, K Owner, L Remark.
+
+**Insert a column in the middle and every field after it silently shifts** — wrong numbers,
+no error. Add new columns at the right-hand end only.
+
+Salary cells accept `40k`, `22.5k`, `40000` and `4.5 lpa` (converted to monthly).
 
 ## Notes
 
