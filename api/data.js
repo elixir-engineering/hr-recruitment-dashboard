@@ -50,7 +50,7 @@ const CFG = () => ({
   sheet: env('SHEET_NAME') || 'Recruitment Tracker',
   sheetReqs: env('SHEET_NAME_REQS') || 'Sheet3',
   driveUser: env('DRIVE_USER'),
-  cacheMs: Math.max(0, parseInt(env('CACHE_SECONDS') || '60', 10) || 60) * 1000
+  cacheMs: Math.max(0, parseInt(env('CACHE_SECONDS') || '15', 10)) * 1000
 });
 
 /* module-scope caches survive between invocations on a warm lambda */
@@ -223,7 +223,11 @@ module.exports = async (req, res) => {
   const c = CFG();
   const debug = req.query && req.query.debug;
   const have = req.query && req.query.v;
-  const unchanged = p => ({ unchanged: true, hash: p.hash, fetchedAt: p.fetchedAt });
+  /* ?fresh=1 — the user pressed Refresh and means NOW. Skipping the cache here
+     is the difference between Refresh working and appearing to do nothing. */
+  const fresh = req.query && req.query.fresh;
+  const age = p => Math.round((Date.now() - new Date(p.fetchedAt).getTime()) / 1000);
+  const unchanged = p => ({ unchanged: true, hash: p.hash, fetchedAt: p.fetchedAt, ageSeconds: age(p) });
 
   const required = ['TENANT_ID', 'CLIENT_ID', 'CLIENT_SECRET', 'FILE_PATH', 'SHEET_NAME'];
   const missing = required.filter(k => !env(k));
@@ -237,10 +241,11 @@ module.exports = async (req, res) => {
   }
 
   /* a poll inside the cache window costs ~60 bytes when nothing has changed */
-  if (CACHE.payload && Date.now() - CACHE.at < c.cacheMs && !debug) {
+  if (CACHE.payload && Date.now() - CACHE.at < c.cacheMs && !debug && !fresh) {
     if (have && have === CACHE.payload.hash) return res.status(200).json(unchanged(CACHE.payload));
-    return res.status(200).json({ ...CACHE.payload, cached: true });
+    return res.status(200).json({ ...CACHE.payload, cached: true, ageSeconds: age(CACHE.payload) });
   }
+  if (fresh) { CACHE = { payload: null, at: 0 }; }   // force a real re-read
 
   /* The page polls every 5s but a cold download takes seconds. Without this,
      each poll starts its own download and they slow each other down until
@@ -255,10 +260,10 @@ module.exports = async (req, res) => {
 
   /* If we hold anything at all, serve it now and let the refresh finish in the
      background — a slow SharePoint must never blank the dashboard. */
-  if (CACHE.payload) {
+  if (CACHE.payload && !fresh) {
     INFLIGHT.catch(() => {});
     if (have && have === CACHE.payload.hash) return res.status(200).json(unchanged(CACHE.payload));
-    return res.status(200).json({ ...CACHE.payload, cached: true, refreshing: true });
+    return res.status(200).json({ ...CACHE.payload, cached: true, refreshing: true, ageSeconds: age(CACHE.payload) });
   }
 
   try {
@@ -287,8 +292,8 @@ module.exports = async (req, res) => {
         fetchedAt: payload.fetchedAt
       });
     }
-    if (have && have === payload.hash) return res.status(200).json(unchanged(payload));
-    return res.status(200).json({ ...payload, cached: false });
+    if (have && have === payload.hash && !fresh) return res.status(200).json(unchanged(payload));
+    return res.status(200).json({ ...payload, cached: false, ageSeconds: 0 });
 
   } catch (e) {
     const aborted = e && (e.name === 'AbortError' || /abort/i.test(String(e.message || '')));

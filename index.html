@@ -462,13 +462,15 @@ function buildReqs(rows){
    SharePoint needs a Microsoft sign-in and sends no CORS header, so the page
    cannot read the workbook itself. api/data.js reads it server-side with an
    Azure AD app registration and returns the rows from our own origin. */
-async function fetchRows(){
+async function fetchRows(force){
   const ctl=new AbortController();
   /* must exceed the server's own 45s budget, otherwise we abort a request that
      was about to succeed and surface a bare "signal is aborted without reason" */
   const to=setTimeout(()=>ctl.abort(),55000);
   try{
-    const r=await fetch('/api/data?_='+Date.now()+(DATA_HASH?'&v='+DATA_HASH:''),
+    const r=await fetch('/api/data?_='+Date.now()
+      +(DATA_HASH&&!force?'&v='+DATA_HASH:'')      // force -> always return full rows
+      +(force?'&fresh=1':''),                      // force -> bypass the server cache
       {signal:ctl.signal,cache:'no-store'});
     const j=await r.json().catch(()=>({}));
     if(!r.ok){
@@ -497,7 +499,7 @@ async function loadLive(manual){
 async function loadLiveInner(manual){
   if(manual)setStat('load','Loading live…');
   let err=null, payload=null;
-  try{ payload=await fetchRows(); }
+  try{ payload=await fetchRows(manual); }
   catch(e){ err=e; }
 
   /* Polling every few seconds, most checks find nothing new. Re-rendering 1000+
@@ -506,7 +508,8 @@ async function loadLiveInner(manual){
   if(payload&&payload.unchanged){
     LAST=new Date();
     setStat('live','Live · '+LAST.toLocaleTimeString(),
-      'No change since the last check at '+LAST.toLocaleString());
+      'No change. Workbook read '+(payload.ageSeconds!=null?payload.ageSeconds+'s ago':'recently')
+      +' · checked '+LAST.toLocaleString());
     if(manual)toast('Checked SharePoint — no changes since the last refresh.',3500);
     return;
   }
@@ -521,8 +524,9 @@ async function loadLiveInner(manual){
       C=c; R=r; SRC_MODE='live'; LAST=new Date(); DATA_HASH=payload.hash||null;
       saveLastGood();
       setStat('live','Live · '+LAST.toLocaleTimeString(),
-        'Read from '+(payload.file||'SharePoint')+' at '+LAST.toLocaleString()
-        +(payload.cached?' (served from a short server-side cache)':''));
+        'Workbook read '+(payload.ageSeconds!=null?payload.ageSeconds+'s ago':'just now')
+        +' · checked '+LAST.toLocaleString()
+        +(payload.cached?' (served from the server cache; it re-reads every 15s)':''));
       rebuildFilters(); render();
       let msg='Refreshed from SharePoint — <b>'+f0(C.length)+'</b> candidate rows, <b>'+f0(R.length)+'</b> requisitions.';
       if(!rqRows)msg+='<br>The <b>'+esc(TAB_REQS)+'</b> tab could not be read'
