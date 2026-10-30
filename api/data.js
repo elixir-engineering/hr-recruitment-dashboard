@@ -34,6 +34,7 @@
 --------------------------------------------------------------------------- */
 
 const crypto = require('crypto');
+const XLSX = require('xlsx');
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const TIMEOUT_MS = 25000;
@@ -111,9 +112,9 @@ async function driveBase(c, tok, signal) {
 }
 
 /* ---------- dates ----------
-   Graph hands back Excel date cells as serial numbers. Converting them through
-   any local-time Date path shifts them a day, which would silently corrupt every
-   figure in the dashboard, so we do pure UTC arithmetic.
+   Excel stores dates as serial numbers. Converting them through any local-time
+   Date path shifts them a day, which would silently corrupt every figure in the
+   dashboard, so we do pure UTC arithmetic.
    25569 = days between the Excel epoch (1899-12-30) and the Unix epoch. */
 const two = n => String(n).padStart(2, '0');
 function serialToDMY(n) {
@@ -121,58 +122,84 @@ function serialToDMY(n) {
   if (isNaN(d)) return String(n);
   return two(d.getUTCDate()) + '/' + two(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear();
 }
-/* "dd\-mm\-yyyy" and "m/d/yy" are dates; "General", "0.00", "#,##0" are not */
-const isDateFmt = f => typeof f === 'string' && !/^general$/i.test(f.trim())
-  && /y/i.test(f) && /[dm]/i.test(f) && !/[#?]/.test(f);
 
-/* "Recruitment Tracker!C3:T1153" -> 2 (zero-based first used column) */
-function colOffset(address) {
-  const m = String(address || '').match(/!\$?([A-Z]+)\$?\d+/i);
-  if (!m) return 0;
-  let n = 0;
-  for (const ch of m[1].toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
-  return n - 1;
+function cellText(c) {
+  if (!c) return '';
+  if (c.t === 'n') {
+    const isDate = (c.z && XLSX.SSF && XLSX.SSF.is_date(c.z))
+      || (!c.z && typeof c.w === 'string' && /^\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}$/.test(c.w.trim()));
+    return isDate ? serialToDMY(c.v) : String(c.v);
+  }
+  if (c.t === 'd' && c.v instanceof Date) {
+    return two(c.v.getUTCDate()) + '/' + two(c.v.getUTCMonth() + 1) + '/' + c.v.getUTCFullYear();
+  }
+  if (c.t === 'b') return c.v ? 'TRUE' : 'FALSE';
+  return String(c.v == null ? '' : c.v).trim();
 }
 
-/* ---------- read one worksheet ---------- */
-async function sheetRows(base, tok, name, signal) {
-  const url = base + "/root:/" + encodeURI(CFG().filePath) + ":/workbook/worksheets('"
-    + encodeURIComponent(name) + "')/usedRange(valuesOnly=true)"
-    + "?$select=address,text,values,numberFormat";
-  const r = await gget(url, tok, signal);
-  if (!r.ok) {
-    const m = (r.json && r.json.error && r.json.error.message) || ('HTTP ' + r.status);
-    return { error: 'worksheet "' + name + '" could not be read: ' + m };
-  }
-  const text = (r.json && r.json.text) || [];
-  const vals = (r.json && r.json.values) || [];
-  const fmts = (r.json && r.json.numberFormat) || [];
-  const pad = colOffset(r.json && r.json.address);
-
-  const rows = text.map((row, i) => {
-    const out = new Array(pad).fill('');
-    for (let c = 0; c < row.length; c++) {
-      const v = vals[i] ? vals[i][c] : null;
-      const f = fmts[i] ? fmts[i][c] : null;
-      if (typeof v === 'number' && isDateFmt(f)) out.push(serialToDMY(v));
-      else if (row[c] !== '' && row[c] != null) out.push(String(row[c]).trim());
-      else out.push(v == null ? '' : String(v).trim());
+/* Walk the sheet by address so column A is always index 0, even when the used
+   range starts further right. Trailing all-blank rows are dropped: stray
+   formatting can stretch a sheet's declared range to thousands of empty rows. */
+function gridOf(ws) {
+  if (!ws || !ws['!ref']) return [];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const out = [];
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const row = [];
+    for (let Cc = 0; Cc <= range.e.c; Cc++) {
+      row.push(cellText(ws[XLSX.utils.encode_cell({ r: R, c: Cc })]));
     }
-    return out;
-  });
-  return { rows, address: r.json && r.json.address };
+    out.push(row);
+  }
+  while (out.length && out[out.length - 1].every(v => v === '')) out.pop();
+  return out;
+}
+
+function rowsOf(wb, wanted) {
+  /* tolerate a renamed or re-cased tab rather than failing outright */
+  const names = wb.SheetNames;
+  const hit = names.find(n => n === wanted)
+    || names.find(n => n.trim().toLowerCase() === wanted.trim().toLowerCase());
+  if (!hit) return { error: 'tab "' + wanted + '" not found. Tabs present: ' + names.join(', ') };
+  const rows = gridOf(wb.Sheets[hit]);
+  return { name: hit, rows, address: wb.Sheets[hit]['!ref'] || null };
+}
+
+/* ---------- download the workbook ----------
+   We deliberately do NOT use the Graph Excel workbook API (usedRange etc).
+   It caps how many cells one request may touch and fails with
+   "The cell count in the range has exceeded the maximum supported number"
+   once a sheet grows or stray formatting inflates its used range. Downloading
+   the file and parsing it locally has no such limit. */
+async function download(base, tok, filePath, signal) {
+  const url = base + '/root:/' + encodeURI(filePath) + ':/content';
+  const r = await fetch(url, { signal, redirect: 'follow', headers: { Authorization: 'Bearer ' + tok } });
+  if (!r.ok) {
+    let detail = 'HTTP ' + r.status;
+    try { detail = (JSON.parse(await r.text()).error || {}).message || detail; } catch {}
+    throw fail('Could not download "' + filePath + '": ' + detail
+      + ' — check FILE_PATH (case-sensitive, no leading slash) and that consent was granted.', 'download');
+  }
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    throw fail('The download did not return an .xlsx file (' + buf.length + ' bytes). '
+      + 'Check FILE_PATH points at the workbook itself.', 'download');
+  }
+  return buf;
 }
 
 /* ---------- the whole read ---------- */
 async function load(c, signal) {
   const tok = await getToken(c, signal);
   const base = await driveBase(c, tok, signal);
+  const buf = await download(base, tok, c.filePath, signal);
 
-  const tr = await sheetRows(base, tok, c.sheet, signal);
-  if (tr.error) throw fail(tr.error + ' — check FILE_PATH and SHEET_NAME.', 'sheet');
+  const wb = XLSX.read(buf, { type: 'buffer', cellNF: true, cellText: true });
+  const tr = rowsOf(wb, c.sheet);
+  if (tr.error) throw fail(tr.error, 'sheet');
 
   /* the requisitions tab is optional; the dashboard runs on the tracker alone */
-  const rq = await sheetRows(base, tok, c.sheetReqs, signal);
+  const rq = rowsOf(wb, c.sheetReqs);
 
   const tracker = tr.rows, reqs = rq.error ? [] : rq.rows;
   const hash = crypto.createHash('sha1')
@@ -182,6 +209,8 @@ async function load(c, signal) {
     tracker, reqs,
     reqsError: rq.error || null,
     hash,
+    tabsFound: wb.SheetNames,
+    bytes: buf.length,
     addresses: { tracker: tr.address, reqs: rq.address || null },
     fetchedAt: new Date().toISOString()
   };
@@ -225,6 +254,8 @@ module.exports = async (req, res) => {
         site: c.driveUser || (c.host + c.sitePath),
         filePath: c.filePath,
         sheets: { tracker: c.sheet, requisitions: c.sheetReqs },
+        tabsFound: payload.tabsFound,
+        workbookBytes: payload.bytes,
         addresses: payload.addresses,
         trackerRows: payload.tracker.length,
         requisitionRows: payload.reqs.length,
