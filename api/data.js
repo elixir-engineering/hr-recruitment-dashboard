@@ -37,7 +37,7 @@ const crypto = require('crypto');
 const XLSX = require('xlsx');
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
-const TIMEOUT_MS = 25000;
+const TIMEOUT_MS = 45000;
 
 const env = k => (process.env[k] || '').trim();
 const CFG = () => ({
@@ -57,6 +57,7 @@ const CFG = () => ({
 let TOKEN = { value: null, exp: 0 };
 let DRIVE = { base: null, at: 0 };
 let CACHE = { payload: null, at: 0 };
+let INFLIGHT = null;        // one shared download, however many callers arrive at once
 
 const fail = (msg, step) => { const e = new Error(msg); e.step = step; return e; };
 
@@ -241,11 +242,27 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ...CACHE.payload, cached: true });
   }
 
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  /* The page polls every 5s but a cold download takes seconds. Without this,
+     each poll starts its own download and they slow each other down until
+     everything times out. One load runs; the rest await the same promise. */
+  if (!INFLIGHT) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+    INFLIGHT = load(c, ctl.signal)
+      .then(p => { CACHE = { payload: p, at: Date.now() }; return p; })
+      .finally(() => { clearTimeout(timer); INFLIGHT = null; });
+  }
+
+  /* If we hold anything at all, serve it now and let the refresh finish in the
+     background — a slow SharePoint must never blank the dashboard. */
+  if (CACHE.payload) {
+    INFLIGHT.catch(() => {});
+    if (have && have === CACHE.payload.hash) return res.status(200).json(unchanged(CACHE.payload));
+    return res.status(200).json({ ...CACHE.payload, cached: true, refreshing: true });
+  }
+
   try {
-    const payload = await load(c, ctl.signal);
-    CACHE = { payload, at: Date.now() };
+    const payload = await INFLIGHT;
 
     if (debug) {
       return res.status(200).json({
@@ -280,8 +297,11 @@ module.exports = async (req, res) => {
     return res.status(aborted ? 504 : 502).json({
       error: aborted ? 'timeout' : (e && e.step) || 'failed',
       failedAt: (e && e.step) || null,
-      message: aborted ? 'Microsoft Graph did not respond within 25 seconds.'
+      message: aborted
+        ? 'Reading the workbook took longer than ' + (TIMEOUT_MS / 1000) + ' seconds. '
+          + 'The file may have grown large — press Ctrl+End in Excel to see whether stray '
+          + 'formatting has stretched the sheet far past the real data.'
         : String((e && e.message) || e)
     });
-  } finally { clearTimeout(timer); }
+  }
 };

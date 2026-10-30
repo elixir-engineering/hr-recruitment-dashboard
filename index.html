@@ -230,6 +230,38 @@ const SNAPSHOT = {"generated":"03 Aug 2026","cands":[{"name":"Faizur Rehman","po
 
 let RAW = null, C = [], R = [], SRC_MODE = 'snapshot', LAST = null, AUTO = 0, AUTOMS = 5000;
 let DATA_HASH = null;        // content hash of the rows we are currently showing
+let LOADING = false;         // a request is already in flight
+let LASTGOOD_AT = null;
+
+/* ---- last-good cache ----
+   The embedded SNAPSHOT is frozen at the day it was generated, so falling back
+   to it after months of live use shows badly stale figures. Instead we keep the
+   most recent successful read in localStorage and prefer that. */
+const LKEY = 'hrdash.lastgood.v1';
+function saveLastGood(){
+  try{
+    localStorage.setItem(LKEY, JSON.stringify({
+      at: new Date().toISOString(), hash: DATA_HASH, cands: C, reqs: R
+    }));
+  }catch(e){ /* quota or private mode — not worth breaking the page over */ }
+}
+function loadLastGood(){
+  try{
+    const o = JSON.parse(localStorage.getItem(LKEY) || 'null');
+    return (o && Array.isArray(o.cands) && o.cands.length) ? o : null;
+  }catch(e){ return null; }
+}
+/* newest of (last good read, embedded snapshot) — used whenever live fails */
+function useFallback(){
+  const g = loadLastGood();
+  if(g){
+    C = g.cands; R = g.reqs || [];
+    SRC_MODE = 'lastgood'; LASTGOOD_AT = new Date(g.at);
+    return 'last successful read from ' + LASTGOOD_AT.toLocaleString();
+  }
+  C = SNAPSHOT.cands; R = SNAPSHOT.reqs; SRC_MODE = 'snapshot';
+  return 'built-in snapshot from ' + SNAPSHOT.generated;
+}
 
 /* ---------------- generic helpers ---------------- */
 const uniq=a=>[...new Set(a)].filter(x=>x!==null&&x!==undefined&&x!=='').sort();
@@ -432,7 +464,9 @@ function buildReqs(rows){
    Azure AD app registration and returns the rows from our own origin. */
 async function fetchRows(){
   const ctl=new AbortController();
-  const to=setTimeout(()=>ctl.abort(),25000);
+  /* must exceed the server's own 45s budget, otherwise we abort a request that
+     was about to succeed and surface a bare "signal is aborted without reason" */
+  const to=setTimeout(()=>ctl.abort(),55000);
   try{
     const r=await fetch('/api/data?_='+Date.now()+(DATA_HASH?'&v='+DATA_HASH:''),
       {signal:ctl.signal,cache:'no-store'});
@@ -456,6 +490,11 @@ function toast(msg,ms){const t=document.getElementById('toast');
   t._h=setTimeout(()=>t.style.display='none',ms||6500);}
 
 async function loadLive(manual){
+  if(LOADING)return;               // a read is already running; let it finish
+  LOADING=true;
+  try{ await loadLiveInner(manual); } finally { LOADING=false; }
+}
+async function loadLiveInner(manual){
   if(manual)setStat('load','Loading live…');
   let err=null, payload=null;
   try{ payload=await fetchRows(); }
@@ -480,6 +519,7 @@ async function loadLive(manual){
       const rqRows=(payload.reqs&&payload.reqs.length)?payload.reqs:null;
       const r=rqRows?buildReqs(rqRows):SNAPSHOT.reqs;
       C=c; R=r; SRC_MODE='live'; LAST=new Date(); DATA_HASH=payload.hash||null;
+      saveLastGood();
       setStat('live','Live · '+LAST.toLocaleTimeString(),
         'Read from '+(payload.file||'SharePoint')+' at '+LAST.toLocaleString()
         +(payload.cached?' (served from a short server-side cache)':''));
@@ -492,14 +532,19 @@ async function loadLive(manual){
     }catch(e){ err=e; }
   }
 
-  // total failure -> snapshot
-  const msg=(err&&err.message)||String(err||'unknown error');
-  if(SRC_MODE!=='live'){ C=SNAPSHOT.cands; R=SNAPSHOT.reqs; SRC_MODE='snapshot'; rebuildFilters(); render(); }
+  // total failure -> fall back to the newest copy we hold
+  let msg=(err&&err.message)||String(err||'unknown error');
+  if(/abort/i.test(msg))msg='the workbook took too long to read (request timed out)';
+  let shown='';
+  if(SRC_MODE!=='live'){ shown=useFallback(); rebuildFilters(); render(); }
   setStat(SRC_MODE==='live'?'live':'snap',
-    SRC_MODE==='live'?'Live (refresh failed)':'Snapshot '+SNAPSHOT.generated, msg);
-  toast('Could not read the workbook — <b>'+esc(msg)+'</b>.<br>Showing the built-in snapshot from '
-    +SNAPSHOT.generated+'.<br>Open <b>/api/data?debug=1</b> to check the connection, '
-    +'and confirm the tabs are still named <b>“'+esc(TAB_TRACKER)+'”</b> and <b>“'+esc(TAB_REQS)+'”</b>.',11000);
+    SRC_MODE==='live'?'Live (refresh failed)'
+      :SRC_MODE==='lastgood'?'Last read '+LASTGOOD_AT.toLocaleTimeString()
+      :'Snapshot '+SNAPSHOT.generated, msg);
+  toast('Could not read the workbook — <b>'+esc(msg)+'</b>.<br>'
+    +(shown?'Showing the '+esc(shown)+'.<br>':'')
+    +'Retrying automatically every few seconds. '
+    +'Open <b>/api/data?debug=1</b> if it does not recover.',9000);
 }
 /* Always on — the workbook is re-checked every 5 seconds. Polling is paused
    while the tab is in the background (no point refreshing what nobody is
@@ -1029,7 +1074,9 @@ function render(){
     'Rejected / not interested':()=>d.filter(r=>r.lost&&r.hike!=null)}[k]||(()=>[]))());
   PAGES.forEach(([id])=>document.getElementById('tb_'+id).classList.toggle('on',id===PAGE));
   document.getElementById('meta').textContent=
-    (SRC_MODE==='live'?'Live from SharePoint':'Snapshot '+SNAPSHOT.generated);
+    (SRC_MODE==='live'?'Live from SharePoint'
+      :SRC_MODE==='lastgood'?'Last successful read · '+(LASTGOOD_AT?LASTGOOD_AT.toLocaleString():'')
+      :'Snapshot '+SNAPSHOT.generated);
   document.getElementById('fcount').textContent=
     f0(d.length)+' of '+f0(C.length)+' candidates · '
     +(reqFiltered()?f0(rq.length)+' of '+f0(R.length):f0(rq.length))+' requisitions'
@@ -1467,7 +1514,9 @@ function exportCSV(){
 SNAPSHOT.cands.forEach(r=>r.dept=deptName(r.dept));
 SNAPSHOT.reqs.forEach(q=>q.dept=deptName(q.dept));
 document.getElementById('fq').oninput=e=>{FQ=e.target.value.toLowerCase().trim();render();};
-C=SNAPSHOT.cands; R=SNAPSHOT.reqs; rebuildFilters(); render();
-setStat('snap','Snapshot '+SNAPSHOT.generated);
+/* show the newest copy we hold while the live read runs */
+useFallback(); rebuildFilters(); render();
+setStat('snap',SRC_MODE==='lastgood'?'Last read '+LASTGOOD_AT.toLocaleTimeString()
+  :'Snapshot '+SNAPSHOT.generated,'Loading live data…');
 loadLive(0); startAuto();
 </script></body></html>
