@@ -1,2 +1,9 @@
-# keep LF endings so Windows editors do not turn every commit into a full-file diff
-*.html text eol=lf
+# Normalise line endings so a Windows checkout never turns a one-line change
+# into a full-file diff, and so `git add` stops warning about LF -> CRLF.
+* text=auto eol=lf
+
+# Binary: never touch these
+*.xlsx binary
+*.png  binary
+*.jpg  binary
+*.pdf  binary
