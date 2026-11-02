@@ -50,7 +50,7 @@ const CFG = () => ({
   sheet: env('SHEET_NAME') || 'Recruitment Tracker',
   sheetReqs: env('SHEET_NAME_REQS') || 'Sheet3',
   driveUser: env('DRIVE_USER'),
-  cacheMs: Math.max(0, parseInt(env('CACHE_SECONDS') || '15', 10)) * 1000
+  cacheMs: Math.max(0, parseInt(env('CACHE_SECONDS') || '60', 10)) * 1000
 });
 
 /* module-scope caches survive between invocations on a warm lambda */
@@ -219,13 +219,25 @@ async function load(c, signal) {
 
 /* ---------- handler ---------- */
 module.exports = async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
   const c = CFG();
   const debug = req.query && req.query.debug;
   const have = req.query && req.query.v;
   /* ?fresh=1 — the user pressed Refresh and means NOW. Skipping the cache here
      is the difference between Refresh working and appearing to do nothing. */
   const fresh = req.query && req.query.fresh;
+
+  /* ---- edge caching ----
+     Polls are served by Vercel's CDN instead of invoking this function. The
+     client polls a STABLE url (/api/data?v=<hash>) — the hash only changes when
+     the workbook changes, so between edits every poll is the same cache key and
+     the CDN answers it. stale-while-revalidate lets the CDN serve the cached
+     copy instantly while it refreshes behind the scenes, so nobody ever waits
+     on SharePoint.
+     Refresh (fresh=1) and the debug view must never be cached. */
+  res.setHeader('Cache-Control', (fresh || debug)
+    ? 'no-store'
+    : 'public, s-maxage=60, stale-while-revalidate=300');
+
   const age = p => Math.round((Date.now() - new Date(p.fetchedAt).getTime()) / 1000);
   const unchanged = p => ({ unchanged: true, hash: p.hash, fetchedAt: p.fetchedAt, ageSeconds: age(p) });
 
@@ -234,6 +246,7 @@ module.exports = async (req, res) => {
   if (!c.driveUser && (!c.host || !c.sitePath)) missing.push('SITE_HOSTNAME + SITE_PATH (or DRIVE_USER)');
 
   if (missing.length) {
+    res.setHeader('Cache-Control', 'no-store');     // config errors must not stick in the CDN
     return res.status(503).json({
       error: 'not_configured', missingEnvVars: missing,
       message: 'Set these in Vercel -> Settings -> Environment Variables, then redeploy.'
@@ -296,6 +309,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ...payload, cached: false, ageSeconds: 0 });
 
   } catch (e) {
+    res.setHeader('Cache-Control', 'no-store');     // never cache a failure
     const aborted = e && (e.name === 'AbortError' || /abort/i.test(String(e.message || '')));
     if (e && e.step === 'token') TOKEN = { value: null, exp: 0 };
     if (e && e.step === 'site') DRIVE = { base: null, at: 0 };
