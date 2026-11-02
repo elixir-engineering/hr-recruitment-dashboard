@@ -72,8 +72,17 @@ Salary cells accept `40k`, `22.5k`, `40000` and `4.5 lpa` (converted to monthly)
   back to the snapshot and `?debug=1` reports `failedAt: "token"`. Set a reminder.
 - Columns are read by position from column A, so inserting a column in the middle of the
   sheet will shift everything. Add new columns at the right-hand end.
-- 60-second server-side cache. The page polls every 5 seconds but sends the content
-  hash it already holds, so an unchanged poll returns ~80 bytes instead of the whole sheet.
+- **No auto-refresh.** The workbook is read once when the page opens and then only when
+  the user presses **↻ Refresh**. The header shows "Updated HH:MM:SS" so nobody mistakes a
+  stale screen for a live one. This was a deliberate cost decision: polling every 5s was
+  consuming ~17,000 serverless invocations a day per open tab and nearly exhausted the
+  Vercel Hobby Fluid Active CPU allowance.
+- Responses carry `s-maxage=60, stale-while-revalidate=300`, so repeat page loads are
+  served by Vercel's CDN rather than invoking the function. Refresh sends `fresh=1`, which
+  bypasses both the CDN and the 60s in-memory cache.
+- Do **not** add a cache-busting query parameter to the normal request — a unique URL per
+  request makes every CDN lookup a guaranteed miss, which is what defeated edge caching
+  the first time.
 - `.gitattributes` pins `*.html` to LF endings, so Windows CRLF does not turn every commit
   into a full-file diff.
 - The Period filter selects candidates by **CV month**. Joined / Still with us / Joined &
