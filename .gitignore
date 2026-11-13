@@ -11,3 +11,11 @@ node_modules/
 
 # Cloudflare Pages build output (assembled by the build command)
 dist/
+
+# Credential notes kept locally — broadened after 'cloudflare keys.txt'
+# slipped past the earlier patterns and would have been pushed by git add -A.
+*key*.txt
+*keys*
+*token*
+*.pem
+*details*.txt
