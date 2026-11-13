@@ -39,6 +39,8 @@ jobs:
           FILE_PATH: ${{ secrets.FILE_PATH }}
           SHEET_NAME: ${{ secrets.SHEET_NAME }}
           SHEET_NAME_REQS: ${{ secrets.SHEET_NAME_REQS }}
+          # set LIST_FILES to 1 temporarily to print what the app can see
+          LIST_FILES: ${{ vars.LIST_FILES }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

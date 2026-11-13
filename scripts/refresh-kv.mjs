@@ -79,13 +79,42 @@ async function driveBase(tok) {
   return GRAPH + '/sites/' + j.id + '/drive';
 }
 
+/* FILE_PATH is a GitHub secret, so its value is masked as *** in the logs and
+   a wrong value is invisible. Accept the shapes people actually paste — a full
+   SharePoint URL, a leading slash, a ?web=1 suffix, %20 escapes — and print a
+   masked-safe description of what we ended up with. */
+function normalisePath(raw) {
+  let s = String(raw || '').trim();
+  const notes = [];
+  if (/^https?:\/\//i.test(s)) {
+    notes.push('stripped full URL');
+    const m = s.match(/\/(?:personal|sites)\/[^/]+\/(?:Documents|Shared%20Documents|Shared Documents)\/(.+)$/i);
+    s = m ? m[1] : s.split('/').pop();
+  }
+  if (s.includes('?')) { notes.push('stripped query string'); s = s.split('?')[0]; }
+  if (s.includes('#')) { s = s.split('#')[0]; }
+  if (/^\/+/.test(s)) { notes.push('stripped leading slash'); s = s.replace(/^\/+/, ''); }
+  if (/%[0-9a-f]{2}/i.test(s)) { notes.push('decoded %-escapes'); try { s = decodeURIComponent(s); } catch { /* leave as-is */ } }
+  return { path: s, notes };
+}
+
 async function download(base, tok) {
-  const r = await fetch(base + '/root:/' + encodeURI(CFG.filePath) + ':/content',
+  const { path, notes } = normalisePath(CFG.filePath);
+  /* describe the path without printing it — GitHub masks the secret anyway */
+  console.log('FILE_PATH check: ' + path.length + ' chars, '
+    + (path.split('/').length - 1) + ' folder level(s), '
+    + (/\.xlsx$/i.test(path) ? 'ends .xlsx' : 'DOES NOT end in .xlsx')
+    + (notes.length ? ' · fixed up: ' + notes.join(', ') : ''));
+
+  const r = await fetch(base + '/root:/' + encodeURI(path) + ':/content',
     { headers: { Authorization: 'Bearer ' + tok }, redirect: 'follow' });
   if (!r.ok) {
     let d = 'HTTP ' + r.status;
     try { d = (JSON.parse(await r.text()).error || {}).message || d; } catch { /* non-JSON */ }
-    throw new Error('Download failed for "' + CFG.filePath + '": ' + d);
+    throw new Error('Download failed (' + d + '). FILE_PATH must be the path inside the drive '
+      + 'with no leading slash and no ?web=1 — for a file in the OneDrive root that is just '
+      + '"HR_data.xlsx". It is case-sensitive. Set LIST_FILES=1 in the workflow to print the '
+      + 'files the app can actually see.');
   }
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
@@ -158,12 +187,28 @@ async function kvPut(key, value, metadata) {
 }
 
 /* ---------- main ---------- */
+/* LIST_FILES=1 -> print what the app can see, so a wrong FILE_PATH can be
+   corrected from evidence instead of guesswork. Filenames only, no contents. */
+async function listFiles(base, tok) {
+  const r = await fetch(base + '/root/children?$select=name,size,folder&$top=100',
+    { headers: { Authorization: 'Bearer ' + tok } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { console.log('Could not list the drive root: ' + ((j.error || {}).message || r.status)); return; }
+  console.log('--- files in the drive root ---');
+  for (const it of (j.value || [])) {
+    console.log('  ' + (it.folder ? '[folder] ' : '         ') + it.name
+      + (it.size ? '  (' + Math.round(it.size / 1024) + ' KB)' : ''));
+  }
+  console.log('--- use one of these names as FILE_PATH (add "Folder/" if it is inside one) ---');
+}
+
 async function main() {
   requireEnv();
   const t0 = Date.now();
 
   const tok = await getToken();
   const base = await driveBase(tok);
+  if (env('LIST_FILES')) await listFiles(base, tok);
   const buf = await download(base, tok);
   console.log('downloaded ' + (buf.length / 1024).toFixed(0) + ' KB in ' + (Date.now() - t0) + ' ms');
 
