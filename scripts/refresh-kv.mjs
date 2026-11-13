@@ -154,17 +154,45 @@ function cellText(c) {
    data — on this workbook a 570 KB file declared a range big enough to produce
    a 71 MB payload of mostly empty strings, which blew the 25 MiB KV limit and
    took 10 s to build. Measuring the true extent gives ~0.5 MB. */
+/* Is this cell real data, or fill-down noise?
+
+   A formula copied to the bottom of the sheet still produces a cell with a
+   value on every empty row. On this workbook the computed day-count columns
+   are filled to row 1,048,574 (Excel's maximum), so counting any non-empty
+   value walked the whole sheet. The rule below is the distinction that
+   matters: a FORMULA that evaluates to zero, blank or an error is not data.
+   A literal zero typed by a person still counts. */
+function hasContent(c) {
+  if (!c) return false;
+  if (c.t === 'e') return false;                       // #VALUE!, #N/A, #REF!
+  const v = c.v;
+  if (v == null) return false;
+  if (typeof v === 'string' && v.trim() === '') return false;
+  if (c.f && (v === 0 || v === '')) return false;      // fill-down artefact
+  return true;
+}
+
 function realExtent(ws) {
   let maxR = -1, maxC = -1;
+  const lastRowOfCol = new Map();                      // for the diagnostic below
   for (const key in ws) {
     if (key.charCodeAt(0) === 33) continue;            // '!' metadata keys
-    const c = ws[key];
-    if (!c || c.v == null || String(c.v).trim() === '') continue;
+    if (!hasContent(ws[key])) continue;
     const a = XLSX.utils.decode_cell(key);
     if (a.r > maxR) maxR = a.r;
     if (a.c > maxC) maxC = a.c;
+    if ((lastRowOfCol.get(a.c) ?? -1) < a.r) lastRowOfCol.set(a.c, a.r);
   }
-  return { maxR, maxC };
+  return { maxR, maxC, lastRowOfCol };
+}
+
+/* If the extent still looks wrong, this says which column is dragging it down
+   so the next fix is evidence-based rather than another guess. */
+function extentReport(ws, label) {
+  const { maxR, lastRowOfCol } = realExtent(ws);
+  const cols = [...lastRowOfCol.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  return label + ': last data row ' + (maxR + 1) + ' · deepest columns '
+    + cols.map(([c, r]) => XLSX.utils.encode_col(c) + '=' + (r + 1)).join(', ');
 }
 
 /* Walk by address so column A is always index 0. */
@@ -243,6 +271,7 @@ async function main() {
   const reqs = rq.error ? [] : rq.rows;
   console.log('tracker: declared ' + (tr.address || '?') + ' -> real '
     + tracker.length + ' rows x ' + (tracker[0] ? tracker[0].length : 0) + ' cols');
+  console.log('  ' + extentReport(wb.Sheets[tr.name], 'tracker'));
   console.log('reqs   : declared ' + (rq.address || '?') + ' -> real '
     + reqs.length + ' rows x ' + (reqs[0] ? reqs[0].length : 0) + ' cols');
   const hash = crypto.createHash('sha1').update(JSON.stringify([tracker, reqs])).digest('hex').slice(0, 16);
