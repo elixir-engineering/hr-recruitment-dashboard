@@ -173,15 +173,39 @@ function hasContent(c) {
 }
 
 function realExtent(ws) {
-  let maxR = -1, maxC = -1;
-  const lastRowOfCol = new Map();                      // for the diagnostic below
+  /* Pass 1: how many columns does each row actually populate, and how deep
+     does each column reach? */
+  const colsPerRow = new Map();
+  const lastRowOfCol = new Map();
   for (const key in ws) {
     if (key.charCodeAt(0) === 33) continue;            // '!' metadata keys
     if (!hasContent(ws[key])) continue;
     const a = XLSX.utils.decode_cell(key);
-    if (a.r > maxR) maxR = a.r;
-    if (a.c > maxC) maxC = a.c;
+    colsPerRow.set(a.r, (colsPerRow.get(a.r) || 0) + 1);
     if ((lastRowOfCol.get(a.c) ?? -1) < a.r) lastRowOfCol.set(a.c, a.r);
+  }
+
+  /* A real record fills several columns. Fill-down junk — a formula or a
+     stray value copied to the bottom of one column — leaves rows with a
+     single populated cell. So the last real row is the deepest row that
+     populates at least two columns.
+
+     This is what finally pinned it on this workbook: column A reached row
+     1,048,574 while every other column stopped near 1,543. Rules based on
+     individual cells kept following column A; looking at how many columns a
+     row fills does not. */
+  let maxR = -1;
+  for (const [r, n] of colsPerRow) if (n >= 2 && r > maxR) maxR = r;
+  if (maxR < 0) for (const r of colsPerRow.keys()) if (r > maxR) maxR = r;  // single-column sheet
+
+  /* Pass 2: width, measured only within the rows we are keeping, so a stray
+     value far to the right on row 900,000 cannot widen every row. */
+  let maxC = -1;
+  for (const key in ws) {
+    if (key.charCodeAt(0) === 33) continue;
+    if (!hasContent(ws[key])) continue;
+    const a = XLSX.utils.decode_cell(key);
+    if (a.r <= maxR && a.c > maxC) maxC = a.c;
   }
   return { maxR, maxC, lastRowOfCol };
 }
@@ -189,9 +213,9 @@ function realExtent(ws) {
 /* If the extent still looks wrong, this says which column is dragging it down
    so the next fix is evidence-based rather than another guess. */
 function extentReport(ws, label) {
-  const { maxR, lastRowOfCol } = realExtent(ws);
-  const cols = [...lastRowOfCol.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
-  return label + ': last data row ' + (maxR + 1) + ' · deepest columns '
+  const { maxR, maxC, lastRowOfCol } = realExtent(ws);
+  const cols = [...lastRowOfCol.entries()].sort((x, y) => y[1] - x[1]).slice(0, 5);
+  return label + ': keeping ' + (maxR + 1) + ' rows x ' + (maxC + 1) + ' cols · deepest columns '
     + cols.map(([c, r]) => XLSX.utils.encode_col(c) + '=' + (r + 1)).join(', ');
 }
 
