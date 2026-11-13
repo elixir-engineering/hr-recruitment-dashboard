@@ -147,15 +147,35 @@ function cellText(c) {
   return String(c.v == null ? '' : c.v).trim();
 }
 
-/* Walk by address so column A is always index 0; drop the all-blank tail that
-   stray formatting leaves behind. */
+/* Find the real extent of the data by looking at the cells that actually exist
+   and hold a value, rather than trusting the sheet's declared !ref.
+
+   This matters enormously. Stray formatting stretches !ref far past the real
+   data — on this workbook a 570 KB file declared a range big enough to produce
+   a 71 MB payload of mostly empty strings, which blew the 25 MiB KV limit and
+   took 10 s to build. Measuring the true extent gives ~0.5 MB. */
+function realExtent(ws) {
+  let maxR = -1, maxC = -1;
+  for (const key in ws) {
+    if (key.charCodeAt(0) === 33) continue;            // '!' metadata keys
+    const c = ws[key];
+    if (!c || c.v == null || String(c.v).trim() === '') continue;
+    const a = XLSX.utils.decode_cell(key);
+    if (a.r > maxR) maxR = a.r;
+    if (a.c > maxC) maxC = a.c;
+  }
+  return { maxR, maxC };
+}
+
+/* Walk by address so column A is always index 0. */
 function gridOf(ws) {
   if (!ws || !ws['!ref']) return [];
-  const range = XLSX.utils.decode_range(ws['!ref']);
+  const { maxR, maxC } = realExtent(ws);
+  if (maxR < 0) return [];
   const out = [];
-  for (let R = range.s.r; R <= range.e.r; R++) {
+  for (let R = 0; R <= maxR; R++) {
     const row = [];
-    for (let C = 0; C <= range.e.c; C++) {
+    for (let C = 0; C <= maxC; C++) {
       row.push(cellText(ws[XLSX.utils.encode_cell({ r: R, c: C })]));
     }
     out.push(row);
@@ -221,6 +241,10 @@ async function main() {
 
   const tracker = tr.rows;
   const reqs = rq.error ? [] : rq.rows;
+  console.log('tracker: declared ' + (tr.address || '?') + ' -> real '
+    + tracker.length + ' rows x ' + (tracker[0] ? tracker[0].length : 0) + ' cols');
+  console.log('reqs   : declared ' + (rq.address || '?') + ' -> real '
+    + reqs.length + ' rows x ' + (reqs[0] ? reqs[0].length : 0) + ' cols');
   const hash = crypto.createHash('sha1').update(JSON.stringify([tracker, reqs])).digest('hex').slice(0, 16);
   const fetchedAt = new Date().toISOString();
 
@@ -252,6 +276,15 @@ async function main() {
     trackerFirstRows: tracker.slice(0, 5),
     reqsFirstRows: reqs.slice(0, 3)
   };
+
+  /* KV caps a value at 25 MiB. Fail loudly rather than sending a doomed write. */
+  const MAX = 24 * 1024 * 1024;
+  if (payload.length > MAX) {
+    throw new Error('Payload is ' + (payload.length / 1048576).toFixed(1) + ' MB, over the 25 MiB KV limit. '
+      + 'That means the sheet still has a huge amount of real data or stray values far from the table. '
+      + 'In Excel press Ctrl+End to see where it thinks the data ends, delete the empty rows/columns '
+      + 'below and right of the real table, and save.');
+  }
 
   await kvPut('payload', payload, metadata);
   await kvPut('meta', JSON.stringify(meta), { hash, fetchedAt });
