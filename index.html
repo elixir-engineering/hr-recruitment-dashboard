@@ -230,6 +230,24 @@ const SNAPSHOT = {"generated":"03 Aug 2026","cands":[{"name":"Faizur Rehman","po
 
 let RAW = null, C = [], R = [], SRC_MODE = 'snapshot', LAST = null;
 let DATA_HASH = null;        // content hash of the rows we are currently showing
+let BACKEND = null;          // 'vercel' | 'cloudflare' — read from the x-backend header
+
+/* How old the underlying workbook read is. On Vercel the route reads the file
+   itself, so this is seconds. On Cloudflare the figures come from KV, written
+   by the scheduled job, so this can be up to the refresh interval. Computing
+   from fetchedAt rather than trusting a baked-in number keeps it honest on
+   both hosts. */
+function dataAge(payload){
+  if(payload && payload.fetchedAt){
+    const ms = Date.now() - Date.parse(payload.fetchedAt);
+    if(!isNaN(ms) && ms >= 0) return Math.round(ms/1000);
+  }
+  return (payload && payload.ageSeconds != null) ? payload.ageSeconds : null;
+}
+const ageText = a => a==null ? 'recently'
+  : a < 90 ? a+'s ago'
+  : a < 5400 ? Math.round(a/60)+' min ago'
+  : Math.round(a/3600)+' h ago';
 let LOADING = false;         // a request is already in flight
 let LASTGOOD_AT = null;
 
@@ -477,6 +495,15 @@ async function fetchRows(force){
       : '/api/data' + (DATA_HASH ? '?v=' + DATA_HASH : '');
     const r=await fetch(url,{signal:ctl.signal,cache:force?'no-store':'default'});
     const j=await r.json().catch(()=>({}));
+    /* The same /api/data path is served by Vercel (api/data.js) and by
+       Cloudflare Pages (functions/api/data.js). Only Cloudflare sets
+       x-backend, so its absence means Vercel answered. Nothing is hardcoded
+       to a host, so one codebase runs on both. */
+    j.__backend = r.headers.get('x-backend') || 'vercel';
+    if(!j.fetchedAt){
+      const h=r.headers.get('x-data-fetched-at');
+      if(h)j.fetchedAt=h;
+    }
     if(!r.ok){
       if(j.error==='not_configured')
         throw new Error('the data endpoint is not configured yet — missing '+(j.missingEnvVars||[]).join(', '));
@@ -510,10 +537,11 @@ async function loadLiveInner(manual){
      rows anyway would burn CPU and reset the user's scroll position mid-read,
      so an unchanged poll only refreshes the timestamp. */
   if(payload&&payload.unchanged){
-    LAST=new Date();
+    LAST=new Date(); BACKEND=payload.__backend||BACKEND;
     setStat('live','Updated '+LAST.toLocaleTimeString(),
-      'No change. Workbook read '+(payload.ageSeconds!=null?payload.ageSeconds+'s ago':'recently')
-      +' · checked '+LAST.toLocaleString());
+      'No change. Workbook read '+ageText(dataAge(payload))
+      +' · checked '+LAST.toLocaleString()
+      +' · served by '+(BACKEND||'?'));
     if(manual)toast('Checked SharePoint — no changes since the last refresh.',3500);
     return;
   }
@@ -526,11 +554,13 @@ async function loadLiveInner(manual){
       const rqRows=(payload.reqs&&payload.reqs.length)?payload.reqs:null;
       const r=rqRows?buildReqs(rqRows):SNAPSHOT.reqs;
       C=c; R=r; SRC_MODE='live'; LAST=new Date(); DATA_HASH=payload.hash||null;
+      BACKEND=payload.__backend||BACKEND;
       saveLastGood();
       setStat('live','Updated '+LAST.toLocaleTimeString(),
-        'Workbook read '+(payload.ageSeconds!=null?payload.ageSeconds+'s ago':'just now')
+        'Workbook read '+ageText(dataAge(payload))
         +' · checked '+LAST.toLocaleString()
-        +(payload.cached?' (served from the server cache; it re-reads every 15s)':''));
+        +' · served by '+(BACKEND||'?')
+        +(payload.cached?' (from cache)':''));
       rebuildFilters(); render();
       let msg='Refreshed from SharePoint — <b>'+f0(C.length)+'</b> candidate rows, <b>'+f0(R.length)+'</b> requisitions.';
       if(!rqRows)msg+='<br>The <b>'+esc(TAB_REQS)+'</b> tab could not be read'

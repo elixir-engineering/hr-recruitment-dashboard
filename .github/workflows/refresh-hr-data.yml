@@ -1,0 +1,45 @@
+name: Refresh HR data
+
+# Parses HR_data.xlsx and writes finished JSON to Cloudflare KV.
+# This runs here rather than in the edge function because the parse costs
+# ~103 ms and a Cloudflare Function gets 10 ms of CPU.
+#
+# It writes to KV, never to the repo — a commit per run would trigger a Pages
+# rebuild, and the free tier allows 500 builds/month.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'     # every 15 minutes (UTC)
+  workflow_dispatch:            # Actions tab -> Run workflow, for an instant refresh
+
+concurrency:
+  group: refresh-hr-data
+  cancel-in-progress: false     # let a run finish rather than leaving KV half-written
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install SheetJS
+        run: npm install --no-save xlsx@0.18.5
+
+      - name: Build payload and write to KV
+        env:
+          TENANT_ID: ${{ secrets.TENANT_ID }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          DRIVE_USER: ${{ secrets.DRIVE_USER }}
+          FILE_PATH: ${{ secrets.FILE_PATH }}
+          SHEET_NAME: ${{ secrets.SHEET_NAME }}
+          SHEET_NAME_REQS: ${{ secrets.SHEET_NAME_REQS }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: node scripts/refresh-kv.mjs

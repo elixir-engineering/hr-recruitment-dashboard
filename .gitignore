@@ -8,3 +8,6 @@
 
 # Node
 node_modules/
+
+# Cloudflare Pages build output (assembled by the build command)
+dist/
