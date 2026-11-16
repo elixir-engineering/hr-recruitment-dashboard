@@ -74,6 +74,8 @@ text[data-full]{cursor:help}
 .kc .v{font-size:19px;font-weight:700;letter-spacing:-.6px;color:var(--c,var(--tx));line-height:1.25}
 /* wraps to as many lines as it needs — grid rows stretch together so the cards stay level */
 .kc .n{font-size:9.5px;color:var(--tx2);line-height:1.35;overflow-wrap:anywhere}
+.kc.kcx{cursor:pointer}
+.kc.kcx:hover{border-color:var(--c,var(--a1));box-shadow:0 0 0 1px var(--c,var(--a1)) inset,var(--sh)}
 
 /* ---------- tabs ---------- */
 .tabs{display:flex;gap:2px;padding:9px 16px 0;flex-shrink:0}
@@ -173,6 +175,7 @@ svg text{font-family:inherit}
   <span class="spacer"></span>
   <span class="st load" id="stat"><i></i><span id="statT">Connecting…</span></span>
   <button class="ib" onclick="loadLive(1)">↻ Refresh</button>
+  <button class="ib" id="rebuildBtn" onclick="rebuildNow()" title="Re-read the workbook from SharePoint now, then reload">⟲ Rebuild data</button>
   <button class="ib" onclick="document.body.classList.toggle('dense');this.textContent=document.body.classList.contains('dense')?'Density: compact':'Density: normal'">Density: normal</button>
   <button class="ib" onclick="exportCSV()">Export CSV</button>
 </div>
@@ -497,6 +500,44 @@ function buildReqs(rows){
    SharePoint needs a Microsoft sign-in and sends no CORS header, so the page
    cannot read the workbook itself. api/data.js reads it server-side with an
    Azure AD app registration and returns the rows from our own origin. */
+/* ---- Rebuild data ----
+   Refresh re-reads whatever the scheduled job last wrote. Rebuild starts that
+   job, so it picks up edits made since. The Action takes ~20 s, so we poll
+   /api/data until the content hash changes rather than guessing a delay. */
+async function rebuildNow(){
+  const btn=document.getElementById('rebuildBtn');
+  if(btn.disabled)return;
+  const before=DATA_HASH;
+  btn.disabled=true; const label=btn.textContent; btn.textContent='⟲ Rebuilding…';
+  setStat('load','Rebuilding…');
+  try{
+    const r=await fetch('/api/refresh',{method:'POST'});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){
+      toast('Could not start the rebuild — <b>'+esc(j.message||j.error||r.status)+'</b>',9000);
+      btn.disabled=false; btn.textContent=label; await loadLive(0); return;
+    }
+    toast('Rebuild started — reading the workbook from SharePoint. This takes about 20 seconds.',6000);
+    /* poll for up to ~90s, stopping as soon as the data actually changes */
+    for(let i=0;i<18;i++){
+      await new Promise(r=>setTimeout(r,5000));
+      await loadLive(1);
+      if(DATA_HASH&&DATA_HASH!==before){
+        toast('Rebuilt — the dashboard is now showing the latest workbook.',5000);
+        break;
+      }
+      btn.textContent='⟲ Rebuilding… '+((i+1)*5)+'s';
+    }
+    if(DATA_HASH===before)
+      toast('The rebuild finished but the workbook content is unchanged, '
+        +'so the figures stay the same.',7000);
+  }catch(e){
+    toast('Could not start the rebuild — <b>'+esc(e.message||e)+'</b>',9000);
+  }finally{
+    btn.disabled=false; btn.textContent=label;
+  }
+}
+
 async function fetchRows(force){
   const ctl=new AbortController();
   /* must exceed the server's own 45s budget, otherwise we abort a request that
@@ -836,7 +877,8 @@ function openDrill(id,key){
   const rows=D.get(key)||[];
   const kind=(typeof D.kind==='function')?D.kind(key):D.kind;
   DCUR={D,key,rows,kind};
-  document.getElementById('dTitle').textContent=D.title.replace('{k}',keyLabel(key));
+  document.getElementById('dTitle').textContent=
+    D.title.includes('{k}')?D.title.replace('{k}',keyLabel(key)):D.title;
   document.getElementById('dSub').textContent=
     rows.length+(kind==='req'?' requisition':' candidate')+(rows.length===1?'':'s')+' · click a column header to sort';
   const K=document.getElementById('dKpi');
@@ -1070,6 +1112,26 @@ function render(){
   DRILL={};                       // resolvers close over the currently filtered data
   const STAGE={CVs:()=>d, Interviewed:()=>d.filter(r=>r.interviewed), Selected:()=>d.filter(r=>r.selected),
                Joined:()=>DJ.filter(r=>r.joined), Retained:()=>DJ.filter(r=>r.retained)};
+  /* ---- KPI cards ----
+     Every card opens the exact rows behind its own number, including the
+     percentage ones: a percentage drills to the population it is measuring,
+     never to the whole dataset. Each uses the same filtered set the card
+     itself was computed from, so the list always matches the figure. */
+  reg('k_cv','CVs received',()=>d);
+  reg('k_iv','Interviewed',()=>d.filter(r=>r.interviewed));
+  reg('k_sel','Reached selection',()=>d.filter(r=>r.selected));
+  reg('k_join','Total joined',()=>DJ.filter(r=>r.joined));          // joining-month view
+  reg('k_pipe','In pipeline',()=>d.filter(r=>r.active));
+  /* the % is (selected - joined) / selected, so the list is the numerator:
+     everyone who reached selection and never started */
+  reg('k_drop','Offer drop-off — selected but never joined',()=>d.filter(r=>r.selected&&!r.joined));
+  reg('k_filled','Positions filled — requisitions with people on board',
+      ()=>rq.filter(q=>q.onboard>0),'req');
+  /* the median is computed only over requisitions that have both an opening
+     date and someone on board, so that is exactly what the list shows */
+  reg('k_days','Days to fill one — requisitions behind the median',
+      ()=>rq.filter(q=>q.start&&q.onboard),'req');
+
   reg('stage','{k}',k=>(STAGE[k]||(()=>[]))());
   reg('conv','{k}',k=>({
     'CV → Interview':()=>d.filter(r=>r.interviewed),
@@ -1158,24 +1220,27 @@ function kstrip(d,m,rq){
   const sanc=sum(rq,q=>q.nos), onb=sum(rq,q=>q.onboard), bal=sum(rq,q=>q.bal);
   const perOn=F.ym.size?' in the selected period':'';
   const K=[
-    ['CVs received',f0(m.cv),'candidates screened','var(--a1)'],
-    ['Interviewed',f0(m.iv),f1(m.c2i)+'% of CVs','var(--a6)'],
-    ['Reached selection',f0(m.sl),'incl. those who joined · '+f1(m.i2s)+'% of interviewed','var(--a3)'],
+    ['CVs received',f0(m.cv),'candidates screened','var(--a1)',null,'k_cv'],
+    ['Interviewed',f0(m.iv),f1(m.c2i)+'% of CVs','var(--a6)',null,'k_iv'],
+    ['Reached selection',f0(m.sl),'incl. those who joined · '+f1(m.i2s)+'% of interviewed','var(--a3)',null,'k_sel'],
     /* headline is every hire ever made; the split between still-here and left sits underneath */
     ['Total joined',f0(MJ.jn),
       MJ.jn?f0(MJ.rt)+' still with us · '+f0(MJ.lf)+' joined & left ('+f1(MJ.attr)+'%)':'no hires yet','var(--a2)',
       (BASIS==='jd'
         ?'Counted by the month the person actually joined'+perOn+', not by when their CV arrived. '
          +'A July CV who started in August counts in August.'
-        :'Period is set to CV date, so this counts hires whose CV arrived'+perOn+', whenever they went on to start.')],
-    ['In pipeline',f0(m.ac),'awaiting decision','var(--a5)'],
-    ['Offer drop-off',f1(m.drop)+'%',f0(m.sl-m.jn)+' never joined','var(--a3)'],
+        :'Period is set to CV date, so this counts hires whose CV arrived'+perOn+', whenever they went on to start.'),
+      'k_join'],
+    ['In pipeline',f0(m.ac),'awaiting decision','var(--a5)',null,'k_pipe'],
+    ['Offer drop-off',f1(m.drop)+'%',f0(m.sl-m.jn)+' never joined','var(--a3)',null,'k_drop'],
     ['Positions filled',f0(onb),
-      sanc?f0(bal)+' still open · of '+f0(sanc)+' sanctioned':'no requisitions','var(--a7)'],
-    ['Days to fill one',fpm==null?'–':f1(fpm)+' d','median, per person placed','var(--a8)'],
+      sanc?f0(bal)+' still open · of '+f0(sanc)+' sanctioned':'no requisitions','var(--a7)',null,'k_filled'],
+    ['Days to fill one',fpm==null?'–':f1(fpm)+' d','median, per person placed','var(--a8)',null,'k_days'],
   ];
-  document.getElementById('kstrip').innerHTML=K.map(([l,v,n,c,hint])=>
-    `<div class="kc" style="--c:${c}" title="${esc(hint||(l+': '+v))}">`
+  document.getElementById('kstrip').innerHTML=K.map(([l,v,n,c,hint,drill])=>
+    `<div class="kc${drill?' kcx':''}" style="--c:${c}"`
+    +` title="${esc((hint||(l+': '+v))+(drill?' · click for the list':''))}"`
+    +(drill?` onclick="openDrill('${drill}','')"`:'')+`>`
     +`<div class="l">${l}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
 }
 
