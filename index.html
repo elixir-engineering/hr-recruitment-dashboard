@@ -409,9 +409,26 @@ function splitPos(v){const s=nrm(v); if(!s)return ['(blank)','','(blank)'];
  return [nrm(s.slice(0,m.index))||s, pre+'/'+m[2], DEPTP[pre]||'Other'];}
 
 const JOINED=['Joined','Joined & Left'];
-const SELST=['Selected','Selected - Offer Extended'].concat(JOINED);
+/* Reached selection — includes those who went on to join, and those who were
+   offered and turned it down. */
+const SELST=['Selected','Selected - Offer Extended','Selected - Offer Rejected'].concat(JOINED);
+/* Still in play. These six are the definition of "In pipeline". */
 const ACTST=['Shortlisted','Interview Scheduled','In Progress','Hold','Selected','Selected - Offer Extended'];
-const LOSTST=['Rejected','Candidate Not Interested'];
+/* Out of the running. "Selected - Offer Rejected" belongs here: they reached
+   selection but turned the offer down, so they are a loss, not a live candidate. */
+const LOSTST=['Rejected','Candidate Not Interested','Selected - Offer Rejected'];
+
+/* ---- one canonical spelling per status ----
+   The sheet contains case variants — "HOLD" alongside "Hold" — and Excel's
+   filter treats those as different values while a human reads them as the
+   same. Until this, "HOLD" matched nothing in the lists above, so those
+   candidates counted as neither active, nor joined, nor lost: they silently
+   vanished from every outcome figure. Matching case-insensitively fixes that
+   and makes the dashboard agree with what a person sees in the column. */
+const STCANON={};
+[...JOINED,...SELST,...ACTST,...LOSTST,'Shortlisted','Interview Scheduled','In Progress']
+  .forEach(x=>{STCANON[x.toLowerCase()]=x;});
+const stName=v=>{const t=nrm(v);return t?(STCANON[t.toLowerCase()]||t):t;};
 
 /* ---------------- status as an ordered timeline ----------------
    Status is not a category — it is where the candidate currently sits in the process,
@@ -434,7 +451,7 @@ function buildCands(rows){
     const name=nrm(r[1]); if(!name||/^candidate name$/i.test(name))return;
     const [pos,code,dept0]=splitPos(r[4]); const dept=deptName(dept0);
     const cvd=pdate(r[3])||pdate(r[0]), ivd=pdate(r[11]), seld=pdate(r[14]), jd=pdate(r[15]);
-    const status=nrm(r[10])||'(blank)';
+    const status=stName(r[10])||'(blank)';
     const cs=psal(r[12]), es=psal(r[13]);
     const o={name,pos,code,dept,
       src:nrm(r[5])||'(blank)', mode:nrm(r[6])||'(blank)',
@@ -1070,7 +1087,10 @@ function render(){
   reg('deptreq','Requisitions — {k}',k=>rq.filter(q=>(q.dept||'(blank)')===k),'req');
   reg('ownerreq','Open requisitions — {k}',k=>rq.filter(q=>q.status==='OPEN'&&q.owner===k),'req');
   // combined key "<group>|<outcome>" used by the stacked / grouped charts
-  const OUT={joined:r=>r.joined, sel:r=>r.selected&&!r.joined, act:r=>r.active&&!r.selected, lost:r=>r.lost,
+  /* Mutually exclusive, so the stacked outcome bars total 100%. Without the
+     !r.lost guard a candidate who reached selection and was then rejected
+     counted in BOTH "Selected, not joined" and "Lost". */
+  const OUT={joined:r=>r.joined, sel:r=>r.selected&&!r.joined&&!r.lost, act:r=>r.active&&!r.selected, lost:r=>r.lost,
              cv:()=>true, sl:r=>r.selected, jn:r=>r.joined, iv:r=>r.interviewed};
   const split=(k,f)=>{const i=k.lastIndexOf('|');return [k.slice(0,i),k.slice(i+1)];};
   reg('srcout','Source: {k}',k=>{const[a,b]=split(k);return d.filter(r=>r.src===a&&(OUT[b]||(()=>true))(r));});
@@ -1333,10 +1353,10 @@ function pgRoi(d,m){
   const src=[...grp(d,r=>r.src)].map(([k,v])=>({k,...M(v)})).sort((a,b)=>b.cv-a.cv);
   const pan=[...grp(d,r=>r.panel)].map(([k,v])=>({k,...M(v)})).filter(p=>p.iv>0).sort((a,b)=>b.iv-a.iv);
   const mix=src.filter(s=>s.cv>=5).slice(0,11).map(s=>{const g=d.filter(r=>r.src===s.k);
-    return {k:s.k,joined:cnt(g,r=>r.joined),sel:cnt(g,r=>r.selected&&!r.joined),
+    return {k:s.k,joined:cnt(g,r=>r.joined),sel:cnt(g,r=>r.selected&&!r.joined&&!r.lost),
             act:cnt(g,r=>r.active&&!r.selected),lost:cnt(g,r=>r.lost)};});
   const recMix=rec.slice(0,8).map(s=>{const g=d.filter(r=>r.rec===s.k);
-    return {k:s.k,joined:cnt(g,r=>r.joined),sel:cnt(g,r=>r.selected&&!r.joined),
+    return {k:s.k,joined:cnt(g,r=>r.joined),sel:cnt(g,r=>r.selected&&!r.joined&&!r.lost),
             act:cnt(g,r=>r.active&&!r.selected),lost:cnt(g,r=>r.lost)};});
   return [
     tile('Recruiter scorecard','Volume is easy — conversion and speed are the real measures','<div>'+
@@ -1544,8 +1564,19 @@ function exportCSV(){
 }
 
 /* ---- boot ---- */
-/* the snapshot was captured before the departments were unified, so relabel it once */
-SNAPSHOT.cands.forEach(r=>r.dept=deptName(r.dept));
+/* The snapshot was parsed by an older build, so its departments and statuses
+   are pre-canonicalisation and its outcome flags were derived from the raw
+   spellings. Re-apply both once at boot, otherwise the offline fallback
+   disagrees with live data — e.g. "HOLD" would sit in no bucket at all. */
+SNAPSHOT.cands.forEach(r=>{
+  r.dept=deptName(r.dept);
+  r.status=stName(r.status)||'(blank)';
+  r.joined=JOINED.includes(r.status)?1:0;
+  r.retained=r.status==='Joined'?1:0;
+  r.left=r.status==='Joined & Left'?1:0;
+  r.active=ACTST.includes(r.status)?1:0;
+  r.lost=LOSTST.includes(r.status)?1:0;
+});
 SNAPSHOT.reqs.forEach(q=>q.dept=deptName(q.dept));
 document.getElementById('fq').oninput=e=>{FQ=e.target.value.toLowerCase().trim();render();};
 /* show the newest copy we hold while the live read runs */
